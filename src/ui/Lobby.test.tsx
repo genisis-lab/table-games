@@ -12,6 +12,8 @@ describe("Lobby", () => {
     expect(screen.getByText("Tic Tac Toe")).toBeInTheDocument();
     expect(screen.getByText("Gomoku")).toBeInTheDocument();
     expect(screen.getByText("Flappy Bird")).toBeInTheDocument();
+    expect(screen.getByText("Snake")).toBeInTheDocument();
+    expect(screen.getByText("2048")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /play four in a row against bot/i }));
     expect(onCreateRoom).toHaveBeenCalledWith("four-in-a-row", {
@@ -30,5 +32,12 @@ describe("Lobby", () => {
       opponent: "bot",
       botDifficulty: "ruthless"
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /play snake solo/i }));
+    expect(onCreateRoom).toHaveBeenCalledWith("snake", {
+      opponent: "bot",
+      botDifficulty: "ruthless"
+    });
+    expect(screen.queryByRole("button", { name: /invite friend to snake/i })).not.toBeInTheDocument();
   });
 });

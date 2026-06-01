@@ -106,6 +106,8 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
   if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
+  if (gameId === "snake") return "A fast little chase for food, clean turns, and just-one-more runs.";
+  if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
   return "Place, slide, make mills, and knock pieces off the board.";
 }
 
@@ -203,6 +205,26 @@ function GamePreview({ gameId }: { gameId: GameId }) {
         <span className="mini-pipe top" />
         <span className="mini-pipe bottom" />
         <span className="mini-ground" />
+      </div>
+    );
+  }
+
+  if (gameId === "snake") {
+    return (
+      <div className="mini-snake" aria-hidden="true">
+        {Array.from({ length: 64 }).map((_, index) => (
+          <span className={index === 18 ? "food" : index >= 34 && index <= 38 ? "body" : ""} key={index} />
+        ))}
+      </div>
+    );
+  }
+
+  if (gameId === "twenty-forty-eight") {
+    return (
+      <div className="mini-twenty" aria-hidden="true">
+        {[2, 4, 0, 8, 0, 16, 32, 0, 4, 0, 64, 128, 0, 256, 0, 512].map((value, index) => (
+          <span className={value ? "filled" : ""} key={index}>{value || ""}</span>
+        ))}
       </div>
     );
   }

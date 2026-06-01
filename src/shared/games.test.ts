@@ -211,6 +211,52 @@ describe("New game engines", () => {
     expect(state.meta?.dots?.vEdges[0]).toHaveLength(7);
   });
 
+  it("offers a compact 3x3 Dots and Boxes mode", () => {
+    const options = getBoardVariantOptions("dots-and-boxes").map((option) => option.label);
+    const state = createGameState("dots-and-boxes", "mini");
+
+    expect(options).toContain("3x3");
+    expect(state.board).toHaveLength(3);
+    expect(state.board[0]).toHaveLength(3);
+    expect(state.meta?.dots?.hEdges).toHaveLength(4);
+    expect(state.meta?.dots?.vEdges[0]).toHaveLength(4);
+  });
+
+  it("does not end Dots and Boxes when the first box is scored", () => {
+    let state = createGameState("dots-and-boxes", "mini");
+    state = play(state, "p1", { edge: "h", row: 0, column: 0 });
+    state = play(state, "p2", { edge: "v", row: 0, column: 0 });
+    state = play(state, "p1", { edge: "h", row: 1, column: 0 });
+    state = play(state, "p2", { edge: "v", row: 0, column: 1 });
+
+    expect(state.board[0][0]).toBe("p2");
+    expect(state.meta?.dots?.scores.p2).toBe(1);
+    expect(state.turn).toBe("p2");
+    expect(state.winner).toBeNull();
+  });
+
+  it("decides Dots and Boxes by the final box count after every line is drawn", () => {
+    const state = createGameState("dots-and-boxes", "mini");
+    const dots = state.meta!.dots!;
+    dots.hEdges = dots.hEdges.map((row) => row.map(() => true));
+    dots.vEdges = dots.vEdges.map((row) => row.map(() => true));
+    dots.hEdges[0][0] = false;
+    state.board = [
+      [null, "p1", "p2"],
+      ["p1", "p2", "p1"],
+      ["p2", "p1", "p2"]
+    ];
+    dots.scores = { p1: 4, p2: 4 };
+    state.turn = "p1";
+
+    const result = applyGameMove(state, "p1", { edge: "h", row: 0, column: 0 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.meta?.dots?.scores).toEqual({ p1: 5, p2: 4 });
+    expect(result.state.winner).toBe("p1");
+  });
+
   it("flips captured discs in Reversi", () => {
     const state = play(createGameState("reversi"), "p1", { row: 2, column: 3 });
 
@@ -238,6 +284,20 @@ describe("New game engines", () => {
     expect(next.meta?.battleship?.humanShots[`${firstShip!.row},${firstShip!.column}`]).toBe("hit");
   });
 
+  it("groups Battleship fleets into named ships for sunk-ship reveals", () => {
+    const state = createGameState("battleship");
+    const fleet = state.meta?.battleship?.botFleet;
+
+    expect(fleet?.map((ship) => [ship.id, ship.size])).toEqual([
+      ["carrier", 5],
+      ["battleship", 4],
+      ["cruiser", 3],
+      ["submarine", 3],
+      ["patrol", 2]
+    ]);
+    expect(state.meta?.battleship?.botShips).toHaveLength(17);
+  });
+
   it("registers Flappy Bird as a solo arcade game", () => {
     const state = createGameState("flappy-bird");
 
@@ -248,6 +308,21 @@ describe("New game engines", () => {
     expect(isSoloGame("flappy-bird")).toBe(true);
     expect(state.board).toEqual([[null]]);
     expect(chooseBotMove(state, "p2", "ruthless")).toBeNull();
+  });
+
+  it("registers Snake and 2048 as solo games", () => {
+    expect(getGameDefinition("snake")).toMatchObject({
+      name: "Snake",
+      supportsFriend: false
+    });
+    expect(getGameDefinition("twenty-forty-eight")).toMatchObject({
+      name: "2048",
+      supportsFriend: false
+    });
+    expect(isSoloGame("snake")).toBe(true);
+    expect(isSoloGame("twenty-forty-eight")).toBe(true);
+    expect(chooseBotMove(createGameState("snake"), "p2", "ruthless")).toBeNull();
+    expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
   it("sows stones and updates stores in Mancala", () => {

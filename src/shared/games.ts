@@ -10,12 +10,14 @@ export type GameId =
   | "mancala"
   | "hex"
   | "nine-mens-morris"
-  | "flappy-bird";
+  | "flappy-bird"
+  | "snake"
+  | "twenty-forty-eight";
 export type PlayerMark = "p1" | "p2";
 export type Winner = PlayerMark | "draw" | null;
 export type Cell = PlayerMark | null;
 export type BotDifficulty = "casual" | "sharp" | "ruthless";
-export type BoardVariant = "classic" | "wide" | "party";
+export type BoardVariant = "mini" | "classic" | "wide" | "party";
 
 export interface BoardPoint {
   row: number;
@@ -51,7 +53,17 @@ export interface BattleshipShot {
   column: number;
 }
 
+export interface BattleshipShip {
+  id: "carrier" | "battleship" | "cruiser" | "submarine" | "patrol";
+  name: string;
+  size: number;
+  orientation: "horizontal" | "vertical";
+  cells: BattleshipShot[];
+}
+
 export interface BattleshipMeta {
+  botFleet: BattleshipShip[];
+  playerFleet: BattleshipShip[];
   botShips: BattleshipShot[];
   playerShips: BattleshipShot[];
   humanShots: Record<string, "hit" | "miss">;
@@ -229,6 +241,26 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     moveMode: "custom",
     playerNames: { p1: "Bird", p2: "Pipes" },
     supportsFriend: false
+  },
+  snake: {
+    id: "snake",
+    name: "Snake",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Snake", p2: "Wall" },
+    supportsFriend: false
+  },
+  "twenty-forty-eight": {
+    id: "twenty-forty-eight",
+    name: "2048",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Tiles", p2: "Board" },
+    supportsFriend: false
   }
 };
 
@@ -245,6 +277,7 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
     { id: "wide", label: "4x4", detail: "16 boards" }
   ],
   "dots-and-boxes": [
+    { id: "mini", label: "3x3", detail: "quick score race" },
     { id: "classic", label: "4x4", detail: "quick boxes" },
     { id: "wide", label: "5x5", detail: "longer table" },
     { id: "party", label: "6x6", detail: "big scramble" }
@@ -255,7 +288,9 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
   mancala: [{ id: "classic", label: "Classic", detail: "6 pits" }],
   hex: [{ id: "classic", label: "Classic", detail: "11x11" }],
   "nine-mens-morris": [{ id: "classic", label: "Classic", detail: "24 points" }],
-  "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }]
+  "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }],
+  snake: [{ id: "classic", label: "Classic", detail: "solo chase" }],
+  "twenty-forty-eight": [{ id: "classic", label: "Classic", detail: "solo merge" }]
 };
 
 const DIRECTIONS = [
@@ -324,7 +359,7 @@ export function supportsFriendMode(gameId: GameId): boolean {
 }
 
 export function isSoloGame(gameId: GameId): boolean {
-  return gameId === "flappy-bird";
+  return gameId === "flappy-bird" || gameId === "snake" || gameId === "twenty-forty-eight";
 }
 
 export function getBoardVariantOptions(gameId: GameId): BoardVariantOption[] {
@@ -404,7 +439,9 @@ export function applyGameMove(
     case "nine-mens-morris":
       return applyMorrisMove(state, player, move);
     case "flappy-bird":
-      return { ok: false, state, reason: "Flappy Bird is a solo arcade run." };
+    case "snake":
+    case "twenty-forty-eight":
+      return { ok: false, state, reason: `${getGameDefinition(state.gameId).name} is a solo arcade run.` };
     default:
       return applyConnectMove(state, player, move);
   }
@@ -431,6 +468,8 @@ export function getLegalMoves(state: GameState): GameMove[] {
     case "nine-mens-morris":
       return getMorrisMoves(state, state.turn);
     case "flappy-bird":
+    case "snake":
+    case "twenty-forty-eight":
       return [];
     default:
       return getConnectMoves(state);
@@ -487,7 +526,7 @@ function dimensionsFor(gameId: GameId, variant: BoardVariant): { rows: number; c
     return { rows: size, columns: size };
   }
   if (gameId === "dots-and-boxes") {
-    const size = variant === "party" ? 6 : variant === "wide" ? 5 : 4;
+    const size = variant === "party" ? 6 : variant === "wide" ? 5 : variant === "mini" ? 3 : 4;
     return { rows: size, columns: size };
   }
   const definition = getGameDefinition(gameId);
@@ -519,7 +558,7 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   }
 
   if (gameId === "dots-and-boxes") {
-    const size = variant === "party" ? 6 : variant === "wide" ? 5 : 4;
+    const size = variant === "party" ? 6 : variant === "wide" ? 5 : variant === "mini" ? 3 : 4;
     return {
       dots: {
         size,
@@ -533,10 +572,14 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   if (gameId === "checkers") return { checkers: { kings: [] } };
 
   if (gameId === "battleship") {
+    const botFleet = makeFleetShips(1);
+    const playerFleet = makeFleetShips(6);
     return {
       battleship: {
-        botShips: makeFleet(1),
-        playerShips: makeFleet(6),
+        botFleet,
+        playerFleet,
+        botShips: flattenFleet(botFleet),
+        playerShips: flattenFleet(playerFleet),
         humanShots: {},
         botShots: {}
       }
@@ -1437,24 +1480,26 @@ function removeMorrisPiece(board: Cell[][], meta: MorrisMeta, opponent: PlayerMa
   }
 }
 
-function makeFleet(offset: number): BattleshipShot[] {
-  const fleet: BattleshipShot[] = [];
-  const ships = [
-    { row: 0, column: offset, length: 5, vertical: false },
-    { row: 2, column: offset + 1, length: 4, vertical: true },
-    { row: 5, column: offset, length: 3, vertical: false },
-    { row: 7, column: offset + 3, length: 3, vertical: true },
-    { row: 9, column: offset, length: 2, vertical: false }
+function makeFleetShips(offset: number): BattleshipShip[] {
+  const ships: Array<Omit<BattleshipShip, "cells"> & { row: number; column: number }> = [
+    { id: "carrier", name: "Carrier", size: 5, orientation: "horizontal", row: 0, column: offset },
+    { id: "battleship", name: "Battleship", size: 4, orientation: "vertical", row: 2, column: offset + 1 },
+    { id: "cruiser", name: "Cruiser", size: 3, orientation: "horizontal", row: 5, column: offset },
+    { id: "submarine", name: "Submarine", size: 3, orientation: "vertical", row: 7, column: offset + 3 },
+    { id: "patrol", name: "Patrol Boat", size: 2, orientation: "horizontal", row: 9, column: offset }
   ];
-  for (const ship of ships) {
-    for (let index = 0; index < ship.length; index += 1) {
-      fleet.push({
-        row: ship.row + (ship.vertical ? index : 0),
-        column: (ship.column + (ship.vertical ? 0 : index)) % 10
-      });
-    }
-  }
-  return fleet;
+
+  return ships.map(({ row, column, ...ship }) => ({
+    ...ship,
+    cells: Array.from({ length: ship.size }, (_, index) => ({
+      row: row + (ship.orientation === "vertical" ? index : 0),
+      column: (column + (ship.orientation === "horizontal" ? index : 0)) % 10
+    }))
+  }));
+}
+
+function flattenFleet(fleet: BattleshipShip[]): BattleshipShot[] {
+  return fleet.flatMap((ship) => ship.cells);
 }
 
 function isMorrisPoint(point: BoardPoint): boolean {

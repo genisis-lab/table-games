@@ -345,6 +345,11 @@ export class GameRoom extends DurableObject<Env> {
       this.send(ws, { type: "error", reason: "Join the room before reacting." });
       return;
     }
+    const spectator = room.spectators.find((candidate) => candidate.guestToken === participant.guestToken);
+    if (spectator && !room.game.winner) {
+      this.send(ws, { type: "error", reason: "Spectators can react after the game ends." });
+      return;
+    }
 
     const reaction: ReactionEvent = {
       id: crypto.randomUUID(),

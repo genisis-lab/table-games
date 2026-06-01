@@ -1,4 +1,8 @@
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Bot,
   Copy,
   Eye,
@@ -6,6 +10,7 @@ import {
   History,
   Home,
   MessageCircle,
+  Play,
   RotateCcw,
   Send,
   Sparkles,
@@ -13,7 +18,7 @@ import {
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
+import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
 import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 
@@ -57,6 +62,7 @@ export function GameRoomView({
   const solo = isSoloGame(room.gameId);
   const boardVariantOptions = getBoardVariantOptions(room.gameId);
   const currentPlayer = room.players.find((player) => player.guestToken === guestToken);
+  const currentSpectator = room.spectators.find((spectator) => spectator.guestToken === guestToken);
   const currentTurnPlayer = room.players.find((player) => player.mark === room.turn);
   const humanPlayers = room.players.filter((player) => !player.isBot);
   const connectedHumanPlayers = humanPlayers.filter((player) => player.connected);
@@ -72,6 +78,7 @@ export function GameRoomView({
     room.players.filter((player) => !player.isBot).length < 2
   );
   const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
+  const spectatorReactionsLocked = Boolean(currentSpectator && !room.winner);
   const status = solo
     ? "Solo run"
     : room.winner
@@ -161,13 +168,15 @@ export function GameRoomView({
           <Board room={room} canMove={canMove} currentMark={currentPlayer?.mark} lastMove={lastMove} onMove={onMove} />
         </section>
 
-        <section className="reaction-dock" aria-label="Reactions">
-          <span><Sparkles size={16} /> React</span>
+        <section className={spectatorReactionsLocked ? "reaction-dock locked" : "reaction-dock"} aria-label="Reactions">
+          <span><Sparkles size={16} /> {spectatorReactionsLocked ? "Finale reactions" : "React"}</span>
           {REACTIONS.map((emoji) => (
             <button
               type="button"
               className="reaction-button"
               aria-label={`React with ${emoji}`}
+              title={spectatorReactionsLocked ? "Spectators can react after the game ends." : `React with ${emoji}`}
+              disabled={spectatorReactionsLocked}
               onClick={() => onReaction(emoji)}
               key={emoji}
             >
@@ -349,6 +358,14 @@ function Board({
 
   if (room.gameId === "nine-mens-morris") {
     return <MorrisBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
+  }
+
+  if (room.gameId === "snake") {
+    return <SnakeGame />;
+  }
+
+  if (room.gameId === "twenty-forty-eight") {
+    return <TwentyFortyEightGame />;
   }
 
   return <FlappyBirdGame />;
@@ -690,6 +707,7 @@ function BattleshipBoard({
 }) {
   const shots = room.meta?.battleship?.humanShots ?? {};
   const botShots = room.meta?.battleship?.botShots ?? {};
+  const sunkShips = (room.meta?.battleship?.botFleet ?? []).filter((ship) => isShipSunk(ship, shots));
   return (
     <div className="battleship-wrap">
       <div className="fleet-status">
@@ -714,9 +732,38 @@ function BattleshipBoard({
             );
           })
         )}
+        {sunkShips.map((ship) => (
+          <span
+            className={`ship-reveal ${ship.id} ${ship.orientation}`}
+            role="img"
+            aria-label={`Sunk ${ship.name}`}
+            style={shipRevealStyle(ship)}
+            key={ship.id}
+          >
+            <span />
+          </span>
+        ))}
       </div>
     </div>
   );
+}
+
+function isShipSunk(ship: BattleshipShip, shots: Record<string, "hit" | "miss">): boolean {
+  return ship.cells.every((cell) => shots[`${cell.row},${cell.column}`] === "hit");
+}
+
+function shipRevealStyle(ship: BattleshipShip): CSSProperties {
+  const rows = ship.cells.map((cell) => cell.row);
+  const columns = ship.cells.map((cell) => cell.column);
+  const minRow = Math.min(...rows);
+  const maxRow = Math.max(...rows);
+  const minColumn = Math.min(...columns);
+  const maxColumn = Math.max(...columns);
+
+  return {
+    gridRow: `${minRow + 1} / span ${maxRow - minRow + 1}`,
+    gridColumn: `${minColumn + 1} / span ${maxColumn - minColumn + 1}`
+  } as CSSProperties;
 }
 
 function MancalaBoard({
@@ -827,6 +874,369 @@ function MorrisBoard({
   );
 }
 
+type SnakeDirection = "up" | "down" | "left" | "right";
+
+interface SnakeRun {
+  phase: "ready" | "playing" | "lost";
+  snake: BoardPoint[];
+  direction: SnakeDirection;
+  queuedDirection: SnakeDirection;
+  food: BoardPoint;
+  score: number;
+  best: number;
+}
+
+const SNAKE_SIZE = 14;
+const SNAKE_BEST_KEY = "table-sparks-snake-best";
+
+function SnakeGame() {
+  const [run, setRun] = useState<SnakeRun>(() => createSnakeRun(readBestScore(SNAKE_BEST_KEY)));
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const start = useCallback(() => {
+    setRun((current) => createSnakeRun(current.best, "playing"));
+  }, []);
+
+  const turn = useCallback((direction: SnakeDirection) => {
+    setRun((current) => {
+      if (current.phase !== "playing" || isOppositeSnakeDirection(direction, current.direction)) return current;
+      return { ...current, queuedDirection: direction };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (run.phase !== "playing") return;
+    const timer = window.setInterval(() => {
+      setRun((current) => advanceSnakeRun(current));
+    }, 130);
+    return () => window.clearInterval(timer);
+  }, [run.phase]);
+
+  useEffect(() => {
+    if (run.phase === "lost" && run.score > run.best) {
+      writeBestScore(SNAKE_BEST_KEY, run.score);
+      setRun((current) => ({ ...current, best: run.score }));
+    }
+  }, [run.best, run.phase, run.score]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const direction = snakeDirectionFromKey(event.key);
+      if (!direction || isTextInputTarget(event.target)) return;
+      event.preventDefault();
+      turn(direction);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [turn]);
+
+  const cells = new Map(run.snake.map((point, index) => [`${point.row},${point.column}`, index]));
+
+  return (
+    <div
+      className={`snake-game ${run.phase}`}
+      role="application"
+      aria-label="Snake"
+      onPointerDown={(event) => {
+        touchStartRef.current = { x: event.clientX, y: event.clientY };
+      }}
+      onPointerUp={(event) => {
+        const startPoint = touchStartRef.current;
+        touchStartRef.current = null;
+        if (!startPoint) return;
+        const x = event.clientX - startPoint.x;
+        const y = event.clientY - startPoint.y;
+        if (Math.max(Math.abs(x), Math.abs(y)) < 22) return;
+        turn(Math.abs(x) > Math.abs(y) ? (x > 0 ? "right" : "left") : y > 0 ? "down" : "up");
+      }}
+    >
+      <div className="arcade-score">
+        <span>{run.score}</span>
+        <small>Best {Math.max(run.best, run.score)}</small>
+      </div>
+      <div className="snake-grid" aria-hidden="true">
+        {Array.from({ length: SNAKE_SIZE * SNAKE_SIZE }).map((_, index) => {
+          const row = Math.floor(index / SNAKE_SIZE);
+          const column = index % SNAKE_SIZE;
+          const snakeIndex = cells.get(`${row},${column}`);
+          const isFood = run.food.row === row && run.food.column === column;
+          return (
+            <span
+              className={`${snakeIndex === 0 ? "snake-head" : snakeIndex !== undefined ? "snake-body" : ""} ${isFood ? "snake-food" : ""}`}
+              key={`${row}-${column}`}
+            />
+          );
+        })}
+      </div>
+      <div className="snake-controls" aria-label="Snake controls">
+        <button type="button" aria-label="Move up" onClick={() => turn("up")}><ArrowUp size={18} /></button>
+        <button type="button" aria-label="Move left" onClick={() => turn("left")}><ArrowLeft size={18} /></button>
+        <button type="button" aria-label="Move down" onClick={() => turn("down")}><ArrowDown size={18} /></button>
+        <button type="button" aria-label="Move right" onClick={() => turn("right")}><ArrowRight size={18} /></button>
+      </div>
+      {run.phase !== "playing" ? (
+        <button className="arcade-start" type="button" aria-label="Start snake" onClick={start}>
+          <Play size={17} />
+          {run.phase === "lost" ? "Again" : "Start"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function createSnakeRun(best: number, phase: SnakeRun["phase"] = "ready"): SnakeRun {
+  const snake = [
+    { row: 7, column: 6 },
+    { row: 7, column: 5 },
+    { row: 7, column: 4 }
+  ];
+
+  return {
+    phase,
+    snake,
+    direction: "right",
+    queuedDirection: "right",
+    food: randomSnakeFood(snake),
+    score: 0,
+    best
+  };
+}
+
+function advanceSnakeRun(run: SnakeRun): SnakeRun {
+  if (run.phase !== "playing") return run;
+  const direction = isOppositeSnakeDirection(run.queuedDirection, run.direction)
+    ? run.direction
+    : run.queuedDirection;
+  const head = run.snake[0];
+  const nextHead = moveSnakePoint(head, direction);
+  const eats = nextHead.row === run.food.row && nextHead.column === run.food.column;
+  const body = eats ? run.snake : run.snake.slice(0, -1);
+  const crashed =
+    nextHead.row < 0 ||
+    nextHead.row >= SNAKE_SIZE ||
+    nextHead.column < 0 ||
+    nextHead.column >= SNAKE_SIZE ||
+    body.some((point) => point.row === nextHead.row && point.column === nextHead.column);
+
+  if (crashed) return { ...run, phase: "lost", direction, queuedDirection: direction };
+
+  const snake = [nextHead, ...body];
+  const score = run.score + (eats ? 1 : 0);
+  return {
+    ...run,
+    snake,
+    direction,
+    queuedDirection: direction,
+    score,
+    food: eats ? randomSnakeFood(snake) : run.food
+  };
+}
+
+function moveSnakePoint(point: BoardPoint, direction: SnakeDirection): BoardPoint {
+  if (direction === "up") return { row: point.row - 1, column: point.column };
+  if (direction === "down") return { row: point.row + 1, column: point.column };
+  if (direction === "left") return { row: point.row, column: point.column - 1 };
+  return { row: point.row, column: point.column + 1 };
+}
+
+function randomSnakeFood(snake: BoardPoint[]): BoardPoint {
+  const occupied = new Set(snake.map((point) => `${point.row},${point.column}`));
+  const open: BoardPoint[] = [];
+  for (let row = 0; row < SNAKE_SIZE; row += 1) {
+    for (let column = 0; column < SNAKE_SIZE; column += 1) {
+      if (!occupied.has(`${row},${column}`)) open.push({ row, column });
+    }
+  }
+  return open[Math.floor(Math.random() * open.length)] ?? { row: 0, column: 0 };
+}
+
+function snakeDirectionFromKey(key: string): SnakeDirection | null {
+  if (key === "ArrowUp" || key.toLowerCase() === "w") return "up";
+  if (key === "ArrowDown" || key.toLowerCase() === "s") return "down";
+  if (key === "ArrowLeft" || key.toLowerCase() === "a") return "left";
+  if (key === "ArrowRight" || key.toLowerCase() === "d") return "right";
+  return null;
+}
+
+function isOppositeSnakeDirection(a: SnakeDirection, b: SnakeDirection): boolean {
+  return (a === "up" && b === "down") ||
+    (a === "down" && b === "up") ||
+    (a === "left" && b === "right") ||
+    (a === "right" && b === "left");
+}
+
+type SlideDirection = "up" | "down" | "left" | "right";
+
+interface TwentyRun {
+  phase: "ready" | "playing" | "over";
+  grid: number[][];
+  score: number;
+  best: number;
+}
+
+const TWENTY_SIZE = 4;
+const TWENTY_BEST_KEY = "table-sparks-2048-best";
+
+function TwentyFortyEightGame() {
+  const [run, setRun] = useState<TwentyRun>(() => createTwentyRun(readBestScore(TWENTY_BEST_KEY), "ready"));
+
+  const start = useCallback(() => {
+    setRun((current) => createTwentyRun(current.best, "playing"));
+  }, []);
+
+  const move = useCallback((direction: SlideDirection) => {
+    setRun((current) => moveTwentyRun(current, direction));
+  }, []);
+
+  useEffect(() => {
+    if (run.phase === "over" && run.score > run.best) {
+      writeBestScore(TWENTY_BEST_KEY, run.score);
+      setRun((current) => ({ ...current, best: run.score }));
+    }
+  }, [run.best, run.phase, run.score]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const direction = twentyDirectionFromKey(event.key);
+      if (!direction || isTextInputTarget(event.target)) return;
+      event.preventDefault();
+      move(direction);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [move]);
+
+  return (
+    <div className={`twenty-game ${run.phase}`} role="application" aria-label="2048">
+      <div className="arcade-score">
+        <span>{run.score}</span>
+        <small>Best {Math.max(run.best, run.score)}</small>
+      </div>
+      <div className="twenty-board" role="group" aria-label="2048 board">
+        {run.grid.flatMap((row, rowIndex) =>
+          row.map((value, columnIndex) => (
+            <span className={value ? `tile value-${value}` : "tile"} key={`${rowIndex}-${columnIndex}`}>
+              {value || ""}
+            </span>
+          ))
+        )}
+      </div>
+      <div className="snake-controls twenty-controls" aria-label="2048 controls">
+        <button type="button" aria-label="Slide up" onClick={() => move("up")}><ArrowUp size={18} /></button>
+        <button type="button" aria-label="Slide left" onClick={() => move("left")}><ArrowLeft size={18} /></button>
+        <button type="button" aria-label="Slide down" onClick={() => move("down")}><ArrowDown size={18} /></button>
+        <button type="button" aria-label="Slide right" onClick={() => move("right")}><ArrowRight size={18} /></button>
+      </div>
+      {run.phase !== "playing" ? (
+        <button className="arcade-start" type="button" aria-label="Start 2048" onClick={start}>
+          <Play size={17} />
+          {run.phase === "over" ? "Again" : "Start"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function createTwentyRun(best: number, phase: TwentyRun["phase"]): TwentyRun {
+  const grid = addRandomTwentyTile(addRandomTwentyTile(emptyTwentyGrid()));
+  return { phase, grid, score: 0, best };
+}
+
+function moveTwentyRun(run: TwentyRun, direction: SlideDirection): TwentyRun {
+  if (run.phase !== "playing") return run;
+  const moved = slideTwentyGrid(run.grid, direction);
+  if (!moved.changed) return run;
+  const grid = addRandomTwentyTile(moved.grid);
+  const score = run.score + moved.score;
+  return {
+    ...run,
+    grid,
+    score,
+    phase: hasTwentyMoves(grid) ? "playing" : "over"
+  };
+}
+
+function emptyTwentyGrid(): number[][] {
+  return Array.from({ length: TWENTY_SIZE }, () => Array.from<number>({ length: TWENTY_SIZE }).fill(0));
+}
+
+function addRandomTwentyTile(grid: number[][]): number[][] {
+  const open: BoardPoint[] = [];
+  for (let row = 0; row < TWENTY_SIZE; row += 1) {
+    for (let column = 0; column < TWENTY_SIZE; column += 1) {
+      if (!grid[row][column]) open.push({ row, column });
+    }
+  }
+  if (open.length === 0) return grid;
+  const point = open[Math.floor(Math.random() * open.length)];
+  const next = grid.map((row) => [...row]);
+  next[point.row][point.column] = Math.random() < 0.9 ? 2 : 4;
+  return next;
+}
+
+function slideTwentyGrid(grid: number[][], direction: SlideDirection): { grid: number[][]; score: number; changed: boolean } {
+  const next = emptyTwentyGrid();
+  let score = 0;
+  let changed = false;
+
+  for (let index = 0; index < TWENTY_SIZE; index += 1) {
+    const line = direction === "left" || direction === "right"
+      ? grid[index]
+      : grid.map((row) => row[index]);
+    const workingLine = direction === "right" || direction === "down" ? [...line].reverse() : [...line];
+    const merged = mergeTwentyLine(workingLine);
+    const output = direction === "right" || direction === "down" ? merged.line.reverse() : merged.line;
+    score += merged.score;
+
+    output.forEach((value, lineIndex) => {
+      if (direction === "left" || direction === "right") next[index][lineIndex] = value;
+      else next[lineIndex][index] = value;
+      const original = direction === "left" || direction === "right" ? grid[index][lineIndex] : grid[lineIndex][index];
+      if (original !== value) changed = true;
+    });
+  }
+
+  return { grid: next, score, changed };
+}
+
+function mergeTwentyLine(line: number[]): { line: number[]; score: number } {
+  const compact = line.filter(Boolean);
+  const merged: number[] = [];
+  let score = 0;
+  for (let index = 0; index < compact.length; index += 1) {
+    if (compact[index] === compact[index + 1]) {
+      const value = compact[index] * 2;
+      merged.push(value);
+      score += value;
+      index += 1;
+    } else {
+      merged.push(compact[index]);
+    }
+  }
+  while (merged.length < TWENTY_SIZE) merged.push(0);
+  return { line: merged, score };
+}
+
+function hasTwentyMoves(grid: number[][]): boolean {
+  if (grid.some((row) => row.some((value) => value === 0))) return true;
+  return grid.some((row, rowIndex) =>
+    row.some((value, columnIndex) =>
+      grid[rowIndex + 1]?.[columnIndex] === value ||
+      row[columnIndex + 1] === value
+    )
+  );
+}
+
+function twentyDirectionFromKey(key: string): SlideDirection | null {
+  if (key === "ArrowUp") return "up";
+  if (key === "ArrowDown") return "down";
+  if (key === "ArrowLeft") return "left";
+  if (key === "ArrowRight") return "right";
+  return null;
+}
+
 interface FlappyPipe {
   id: number;
   x: number;
@@ -879,7 +1289,7 @@ function FlappyBirdGame() {
 
   useEffect(() => {
     if (run.phase === "crashed" && run.score > run.best) {
-      localStorage.setItem(FLAPPY_BEST_KEY, String(run.score));
+      writeBestScore(FLAPPY_BEST_KEY, run.score);
       setRun((current) => ({ ...current, best: run.score }));
     }
   }, [run.best, run.phase, run.score]);
@@ -915,6 +1325,11 @@ function FlappyBirdGame() {
       aria-label="Flappy Bird"
       tabIndex={0}
       onPointerDown={(event) => {
+        if (run.phase !== "playing") return;
+        event.preventDefault();
+        flap();
+      }}
+      onTouchStart={(event) => {
         if (run.phase !== "playing") return;
         event.preventDefault();
         flap();
@@ -1036,8 +1451,24 @@ function makePipe(x: number, id: number): FlappyPipe {
 }
 
 function readFlappyBest(): number {
-  const value = Number(localStorage.getItem(FLAPPY_BEST_KEY) ?? 0);
-  return Number.isFinite(value) && value > 0 ? value : 0;
+  return readBestScore(FLAPPY_BEST_KEY);
+}
+
+function readBestScore(key: string): number {
+  try {
+    const value = Number(localStorage.getItem(key) ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeBestScore(key: string, score: number): void {
+  try {
+    localStorage.setItem(key, String(score));
+  } catch {
+    // Scores are local-only polish; gameplay should continue if storage is unavailable.
+  }
 }
 
 function isTextInputTarget(target: EventTarget | null): boolean {
@@ -1119,6 +1550,8 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
   if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
+  if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
+  if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
   return "Place nine pieces, form mills of three, then slide pieces and remove opponent pieces.";
 }
 

@@ -103,6 +103,63 @@ describe("GameRoomView", () => {
     expect(screen.getAllByText("🔥").length).toBeGreaterThan(1);
   });
 
+  it("keeps spectator reactions locked until the game is over", () => {
+    const onReaction = vi.fn();
+    const spectatorRoom: RoomSnapshot = {
+      ...room,
+      spectators: [
+        { guestToken: "watch-token", name: "Wally", connected: true, joinedAt: 4 }
+      ]
+    };
+    const { rerender } = render(
+      <GameRoomView
+        room={spectatorRoom}
+        guestToken="watch-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={onReaction}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const reactionButton = screen.getByRole("button", { name: "React with 😂" });
+    expect(reactionButton).toBeDisabled();
+    fireEvent.click(reactionButton);
+    expect(onReaction).not.toHaveBeenCalled();
+
+    rerender(
+      <GameRoomView
+        room={{ ...spectatorRoom, winner: "p1" }}
+        guestToken="watch-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={onReaction}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const unlockedButton = screen.getByRole("button", { name: "React with 😂" });
+    expect(unlockedButton).not.toBeDisabled();
+    fireEvent.click(unlockedButton);
+    expect(onReaction).toHaveBeenCalledWith("😂");
+  });
+
   it("disables board moves when it is not the current player's turn", () => {
     const onMove = vi.fn();
     render(
@@ -259,6 +316,64 @@ describe("GameRoomView", () => {
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
   });
 
+  it("renders Snake and 2048 as solo arcade tables", () => {
+    const { rerender } = render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "snake",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("application", { name: "Snake" })).toBeInTheDocument();
+    expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
+
+    rerender(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "twenty-forty-eight",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "2048 board" })).toBeInTheDocument();
+    expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
+  });
+
   it("starts Flappy Bird only from the start button while ready", () => {
     render(
       <GameRoomView
@@ -388,6 +503,64 @@ describe("GameRoomView", () => {
     );
 
     expect(screen.getByLabelText("Box 1, 1 open with 3 sides")).toHaveClass("almost");
+  });
+
+  it("reveals sunk Battleship ship art after every cell in that ship is hit", () => {
+    const shipCells = [
+      { row: 1, column: 1 },
+      { row: 1, column: 2 }
+    ];
+
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "battleship",
+          opponent: "bot",
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          board: Array.from({ length: 10 }, () => Array.from<Cell>({ length: 10 }).fill(null)),
+          meta: {
+            battleship: {
+              botFleet: [
+                {
+                  id: "patrol",
+                  name: "Patrol Boat",
+                  size: 2,
+                  orientation: "horizontal",
+                  cells: shipCells
+                }
+              ],
+              playerFleet: [],
+              botShips: shipCells,
+              playerShips: [],
+              humanShots: {
+                "1,1": "hit",
+                "1,2": "hit"
+              },
+              botShots: {}
+            }
+          }
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("img", { name: "Sunk Patrol Boat" })).toBeInTheDocument();
   });
 
   it("shows rules, move history, and undo requests", () => {

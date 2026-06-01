@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 type ServerMessage = {
   type: string;
+  reason?: string;
+  winner?: string;
   room?: {
     roomId: string;
     gameId: string;
     boardVariant?: string;
     board: Array<Array<string | null>>;
-    players: Array<{ name: string; mark: string; guestToken?: string; isBot?: boolean }>;
+    players: Array<{ name: string; mark: string; guestToken?: string; connected?: boolean; isBot?: boolean }>;
     spectators: Array<{ name: string; guestToken?: string }>;
     chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
@@ -237,7 +239,9 @@ describe("GameRoom Durable Object", () => {
     expect(spectatorSnapshot.room?.spectators).toMatchObject([{ name: "Wally" }]);
 
     yellow.close();
-    await waitForType(red, "presence_changed");
+    await waitForRoomWhere(red, (room) =>
+      room.players.some((player) => player.name === "Sunny" && player.connected === false)
+    );
     watcher.send(JSON.stringify({ type: "claim_seat" }));
     const claimed = await waitForRoomWhere(red, (room) =>
       room.players.some((player) => player.name === "Wally" && player.mark === "p2")
@@ -246,6 +250,45 @@ describe("GameRoom Durable Object", () => {
       expect.arrayContaining([expect.objectContaining({ name: "Wally", mark: "p2" })])
     );
     expect(claimed.room?.spectators).toHaveLength(0);
+  });
+
+  it("blocks spectator reactions until the game ends", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const x = await openRoomSocket(roomId);
+    const o = await openRoomSocket(roomId);
+    const watcher = await openRoomSocket(roomId);
+    x.send(JSON.stringify({ type: "join", guestToken: "token-x", name: "Xena" }));
+    await waitForType(x, "room_snapshot");
+    o.send(JSON.stringify({ type: "join", guestToken: "token-o", name: "Omar" }));
+    await waitForType(o, "room_snapshot");
+    watcher.send(JSON.stringify({ type: "join", guestToken: "token-watch", name: "Wally" }));
+    await waitForType(watcher, "room_snapshot");
+
+    watcher.send(JSON.stringify({ type: "send_reaction", emoji: "🔥" }));
+    const blocked = await waitForType(watcher, "error");
+    expect(blocked.reason).toBe("Spectators can react after the game ends.");
+
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    await waitForType(o, "move_applied");
+    o.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 0 } }));
+    await waitForType(x, "move_applied");
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 1 } }));
+    await waitForType(o, "move_applied");
+    o.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 1 } }));
+    await waitForType(x, "move_applied");
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 2 } }));
+    const gameOver = await waitForType(watcher, "game_over");
+    expect(gameOver.winner).toBe("p1");
+
+    watcher.send(JSON.stringify({ type: "send_reaction", emoji: "🏆" }));
+    const reaction = await waitForType(x, "reaction_added");
+    expect(reaction.reaction?.emoji).toBe("🏆");
   });
 });
 
