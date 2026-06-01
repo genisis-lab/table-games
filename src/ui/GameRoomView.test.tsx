@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Cell } from "../shared/games";
 import type { AppliedMove } from "../shared/protocol";
 import type { RoomSnapshot } from "../shared/protocol";
-import { GameRoomView } from "./GameRoomView";
+import { createFlappyRun, GameRoomView } from "./GameRoomView";
 
 const room: RoomSnapshot = {
   roomId: "room-test",
@@ -257,6 +257,91 @@ describe("GameRoomView", () => {
     expect(screen.getByRole("application", { name: "Flappy Bird" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
+  });
+
+  it("starts Flappy Bird only from the start button while ready", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const game = screen.getByRole("application", { name: "Flappy Bird" });
+    fireEvent.pointerDown(game);
+    expect(game).toHaveClass("ready");
+    expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: " " });
+    expect(game).toHaveClass("ready");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    expect(game).toHaveClass("playing");
+    expect(screen.queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
+  });
+
+  it("lets desktop players flap Flappy Bird with the space key without focusing the game", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const allowed = fireEvent.keyDown(window, { key: " ", cancelable: true });
+
+    expect(screen.getByRole("application", { name: "Flappy Bird" })).toHaveClass("playing");
+    expect(allowed).toBe(false);
+  });
+
+  it("creates a fresh random Flappy pipe for each new run", () => {
+    const random = vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0.1)
+      .mockReturnValueOnce(0.8);
+
+    const firstRun = createFlappyRun(4);
+    const secondRun = createFlappyRun(4);
+
+    expect(firstRun.best).toBe(4);
+    expect(secondRun.pipes[0].gapTop).not.toBe(firstRun.pipes[0].gapTop);
+    random.mockRestore();
   });
 
   it("highlights nearly completed Dots and Boxes squares as the real scoring target", () => {

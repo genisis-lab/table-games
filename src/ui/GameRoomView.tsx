@@ -12,7 +12,7 @@ import {
   Undo2,
   UsersRound
 } from "lucide-react";
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
 import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
@@ -853,14 +853,7 @@ const FLAPPY_GAP = 158;
 const FLAPPY_BEST_KEY = "table-sparks-flappy-best";
 
 function FlappyBirdGame() {
-  const [run, setRun] = useState<FlappyRun>(() => ({
-    phase: "ready",
-    birdY: 250,
-    velocity: 0,
-    pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
-    score: 0,
-    best: Number(localStorage.getItem(FLAPPY_BEST_KEY) ?? 0)
-  }));
+  const [run, setRun] = useState<FlappyRun>(() => createFlappyRun(readFlappyBest()));
   const frameRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const nextPipeIdRef = useRef(2);
@@ -891,22 +884,29 @@ function FlappyBirdGame() {
     }
   }, [run.best, run.phase, run.score]);
 
-  const flap = () => {
+  const startRun = useCallback((best: number) => {
+    nextPipeIdRef.current = 2;
+    return createFlappyRun(best, "playing", -345);
+  }, []);
+
+  const flap = useCallback(() => {
     setRun((current) => {
-      if (current.phase !== "playing") {
-        nextPipeIdRef.current = 2;
-        return {
-          phase: "playing",
-          birdY: 250,
-          velocity: -345,
-          pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
-          score: 0,
-          best: current.best
-        };
-      }
+      if (current.phase !== "playing") return current;
       return { ...current, velocity: -345 };
     });
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== " " && event.key !== "ArrowUp" && event.key !== "Enter") return;
+      if (isTextInputTarget(event.target)) return;
+      event.preventDefault();
+      flap();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [flap]);
 
   return (
     <div
@@ -914,12 +914,10 @@ function FlappyBirdGame() {
       role="application"
       aria-label="Flappy Bird"
       tabIndex={0}
-      onPointerDown={flap}
-      onKeyDown={(event) => {
-        if (event.key === " " || event.key === "ArrowUp" || event.key === "Enter") {
-          event.preventDefault();
-          flap();
-        }
+      onPointerDown={(event) => {
+        if (run.phase !== "playing") return;
+        event.preventDefault();
+        flap();
       }}
     >
       <div className="flappy-score" aria-label="Score">
@@ -952,13 +950,28 @@ function FlappyBirdGame() {
       {run.phase !== "playing" ? (
         <button className="flappy-start" type="button" aria-label="Start run" onClick={(event) => {
           event.stopPropagation();
-          flap();
+          setRun((current) => startRun(current.best));
         }}>
           {run.phase === "crashed" ? "Again" : "Start"}
         </button>
       ) : null}
     </div>
   );
+}
+
+export function createFlappyRun(
+  best: number,
+  phase: FlappyRun["phase"] = "ready",
+  velocity = 0
+): FlappyRun {
+  return {
+    phase,
+    birdY: 250,
+    velocity,
+    pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
+    score: 0,
+    best
+  };
 }
 
 function advanceFlappyRun(
@@ -1020,6 +1033,16 @@ function makePipe(x: number, id: number): FlappyPipe {
     gapTop: 106 + Math.floor(Math.random() * 258),
     scored: false
   };
+}
+
+function readFlappyBest(): number {
+  const value = Number(localStorage.getItem(FLAPPY_BEST_KEY) ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.matches("input, textarea, select, [contenteditable='true']");
 }
 
 function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"] }) {
