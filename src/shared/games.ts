@@ -14,6 +14,7 @@ export type PlayerMark = "p1" | "p2";
 export type Winner = PlayerMark | "draw" | null;
 export type Cell = PlayerMark | null;
 export type BotDifficulty = "casual" | "sharp" | "ruthless";
+export type BoardVariant = "classic" | "wide" | "party";
 
 export interface BoardPoint {
   row: number;
@@ -88,6 +89,7 @@ export interface GameDefinition {
 
 export interface GameState {
   gameId: GameId;
+  boardVariant: BoardVariant;
   board: Cell[][];
   turn: PlayerMark;
   winner: Winner;
@@ -99,6 +101,12 @@ export interface GameState {
 export type MoveResult =
   | { ok: true; state: GameState; point: BoardPoint }
   | { ok: false; state: GameState; reason: string };
+
+export interface BoardVariantOption {
+  id: BoardVariant;
+  label: string;
+  detail: string;
+}
 
 const DEFINITIONS: Record<GameId, GameDefinition> = {
   "four-in-a-row": {
@@ -213,6 +221,31 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
   }
 };
 
+const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
+  "four-in-a-row": [{ id: "classic", label: "Classic", detail: "7x6" }],
+  "tic-tac-toe": [
+    { id: "classic", label: "3x3", detail: "connect 3" },
+    { id: "wide", label: "5x5", detail: "connect 4" },
+    { id: "party", label: "7x7", detail: "connect 5" }
+  ],
+  gomoku: [{ id: "classic", label: "Classic", detail: "15x15" }],
+  "ultimate-tic-tac-toe": [
+    { id: "classic", label: "3x3", detail: "9 boards" },
+    { id: "wide", label: "4x4", detail: "16 boards" }
+  ],
+  "dots-and-boxes": [
+    { id: "classic", label: "4x4", detail: "quick boxes" },
+    { id: "wide", label: "5x5", detail: "longer table" },
+    { id: "party", label: "6x6", detail: "big scramble" }
+  ],
+  reversi: [{ id: "classic", label: "Classic", detail: "8x8" }],
+  checkers: [{ id: "classic", label: "Classic", detail: "8x8" }],
+  battleship: [{ id: "classic", label: "Classic", detail: "10x10" }],
+  mancala: [{ id: "classic", label: "Classic", detail: "6 pits" }],
+  hex: [{ id: "classic", label: "Classic", detail: "11x11" }],
+  "nine-mens-morris": [{ id: "classic", label: "Classic", detail: "24 points" }]
+};
+
 const DIRECTIONS = [
   { row: 0, column: 1 },
   { row: 1, column: 0 },
@@ -278,10 +311,23 @@ export function supportsFriendMode(gameId: GameId): boolean {
   return getGameDefinition(gameId).supportsFriend;
 }
 
-export function createGameState(gameId: GameId): GameState {
+export function getBoardVariantOptions(gameId: GameId): BoardVariantOption[] {
+  return BOARD_VARIANTS[gameId];
+}
+
+export function isBoardVariantForGame(gameId: GameId, variant: string): variant is BoardVariant {
+  return BOARD_VARIANTS[gameId].some((option) => option.id === variant);
+}
+
+export function getDefaultBoardVariant(gameId: GameId): BoardVariant {
+  return BOARD_VARIANTS[gameId][0].id;
+}
+
+export function createGameState(gameId: GameId, boardVariant: BoardVariant = getDefaultBoardVariant(gameId)): GameState {
   const definition = getGameDefinition(gameId);
-  const board = Array.from({ length: definition.rows }, () =>
-    Array.from<Cell>({ length: definition.columns }).fill(null)
+  const dimensions = dimensionsFor(gameId, boardVariant);
+  const board = Array.from({ length: dimensions.rows }, () =>
+    Array.from<Cell>({ length: dimensions.columns }).fill(null)
   );
 
   if (gameId === "reversi") {
@@ -306,12 +352,13 @@ export function createGameState(gameId: GameId): GameState {
 
   return {
     gameId,
+    boardVariant,
     board,
     turn: "p1",
     winner: null,
     winningLine: [],
     moveCount: 0,
-    meta: createMeta(gameId)
+    meta: createMeta(gameId, boardVariant)
   };
 }
 
@@ -386,12 +433,16 @@ export function chooseBotMove(
   if (blockingMove && state.gameId !== "battleship") return blockingMove;
 
   if (state.gameId === "tic-tac-toe" && difficulty === "ruthless") {
-    return chooseByMinimax(state, player, legalMoves, 9);
+    return state.board.length === 3
+      ? chooseByMinimax(state, player, legalMoves, 9)
+      : chooseBySearch({ ...state, turn: player }, player, legalMoves, 2);
   }
 
   if (state.gameId === "battleship") return legalMoves[Math.floor(Math.random() * legalMoves.length)];
 
-  const depth = difficulty === "casual"
+  const depth = legalMoves.length > 90
+    ? 1
+    : difficulty === "casual"
     ? 1
     : difficulty === "sharp"
       ? 2
@@ -401,13 +452,50 @@ export function chooseBotMove(
   return chooseBySearch({ ...state, turn: player }, player, legalMoves, depth);
 }
 
-function createMeta(gameId: GameId): GameMeta | undefined {
+function dimensionsFor(gameId: GameId, variant: BoardVariant): { rows: number; columns: number } {
+  if (gameId === "tic-tac-toe") {
+    const size = variant === "party" ? 7 : variant === "wide" ? 5 : 3;
+    return { rows: size, columns: size };
+  }
   if (gameId === "ultimate-tic-tac-toe") {
-    return { ultimate: { localWinners: Array.from<Winner>({ length: 9 }).fill(null), activeBoard: null } };
+    const localSize = variant === "wide" ? 4 : 3;
+    const size = localSize * localSize;
+    return { rows: size, columns: size };
+  }
+  if (gameId === "dots-and-boxes") {
+    const size = variant === "party" ? 6 : variant === "wide" ? 5 : 4;
+    return { rows: size, columns: size };
+  }
+  const definition = getGameDefinition(gameId);
+  return { rows: definition.rows, columns: definition.columns };
+}
+
+function connectLengthFor(state: GameState): number {
+  if (state.gameId === "tic-tac-toe") {
+    if (state.board.length >= 7) return 5;
+    if (state.board.length >= 5) return 4;
+    return 3;
+  }
+  return getGameDefinition(state.gameId).connectLength;
+}
+
+function ultimateLocalSize(state: GameState): number {
+  return Math.sqrt(state.board.length);
+}
+
+function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined {
+  if (gameId === "ultimate-tic-tac-toe") {
+    const localSize = variant === "wide" ? 4 : 3;
+    return {
+      ultimate: {
+        localWinners: Array.from<Winner>({ length: localSize * localSize }).fill(null),
+        activeBoard: null
+      }
+    };
   }
 
   if (gameId === "dots-and-boxes") {
-    const size = 4;
+    const size = variant === "party" ? 6 : variant === "wide" ? 5 : 4;
     return {
       dots: {
         size,
@@ -455,11 +543,11 @@ function applyConnectMove(state: GameState, player: PlayerMark, move: GameMove):
   const board = cloneBoard(state.board);
   board[target.point.row][target.point.column] = player;
 
-  const winningLine = findWinningLine(board, target.point, player, definition.connectLength);
+  const winningLine = findWinningLine(board, target.point, player, connectLengthFor(state));
   const moveCount = state.moveCount + 1;
   const winner = winningLine.length > 0
     ? player
-    : moveCount === definition.rows * definition.columns
+    : moveCount === state.board.length * state.board[0].length
       ? "draw"
       : null;
 
@@ -468,10 +556,11 @@ function applyConnectMove(state: GameState, player: PlayerMark, move: GameMove):
 
 function applyUltimateMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
   const meta = cloneMeta(state).ultimate!;
+  const localSize = ultimateLocalSize(state);
   const target = resolveTarget(state, move);
   if (!target.ok) return { ok: false, state, reason: target.reason };
 
-  const mini = ultimateBoardIndex(target.point.row, target.point.column);
+  const mini = ultimateBoardIndex(state, target.point.row, target.point.column);
   if (meta.activeBoard !== null && mini !== meta.activeBoard) {
     return { ok: false, state, reason: "Play inside the highlighted small board." };
   }
@@ -482,18 +571,18 @@ function applyUltimateMove(state: GameState, player: PlayerMark, move: GameMove)
   const board = cloneBoard(state.board);
   board[target.point.row][target.point.column] = player;
 
-  const localLine = findLocalTicLine(board, mini, player);
+  const localLine = findLocalTicLine(state, board, mini, player);
   if (localLine.length > 0) meta.localWinners[mini] = player;
-  else if (localCells(board, mini).every((cell) => cell !== null)) meta.localWinners[mini] = "draw";
+  else if (localCells(state, board, mini).every((cell) => cell !== null)) meta.localWinners[mini] = "draw";
 
-  const globalWinnerLine = findMetaLine(meta.localWinners, player);
+  const globalWinnerLine = findMetaLine(meta.localWinners, player, localSize);
   const full = meta.localWinners.every(Boolean);
-  const nextActive = ultimateLocalIndex(target.point.row, target.point.column);
+  const nextActive = ultimateLocalIndex(state, target.point.row, target.point.column);
   meta.activeBoard = meta.localWinners[nextActive] ? null : nextActive;
 
   const winner = globalWinnerLine.length > 0 ? player : full ? "draw" : null;
   return okMove(state, board, player, target.point, {
-    winningLine: winner === player ? globalWinnerLine.flatMap((index) => miniCenterPoints(index)) : localLine,
+    winningLine: winner === player ? globalWinnerLine.flatMap((index) => miniCenterPoints(state, index)) : localLine,
     winner,
     meta: { ...cloneMeta(state), ultimate: meta }
   });
@@ -509,7 +598,7 @@ function applyDotsMove(state: GameState, player: PlayerMark, move: GameMove): Mo
   }
 
   const edgeGrid = move.edge === "h" ? meta.hEdges : meta.vEdges;
-  if (!edgeGrid[row]?.[column] === undefined || edgeGrid[row]?.[column]) {
+  if (edgeGrid[row]?.[column] === undefined || edgeGrid[row][column]) {
     return { ok: false, state, reason: "That line is already drawn." };
   }
 
@@ -773,12 +862,12 @@ function okMove(
 function getConnectMoves(state: GameState): GameMove[] {
   const definition = getGameDefinition(state.gameId);
   if (definition.moveMode === "drop-column") {
-    return Array.from({ length: definition.columns }, (_, column) => ({ column }))
+    return Array.from({ length: state.board[0].length }, (_, column) => ({ column }))
       .filter((move) => !state.board[0][move.column]);
   }
 
   if (state.gameId === "gomoku" && state.moveCount === 0) {
-    return [{ row: Math.floor(definition.rows / 2), column: Math.floor(definition.columns / 2) }];
+    return [{ row: Math.floor(state.board.length / 2), column: Math.floor(state.board[0].length / 2) }];
   }
 
   const moves = getEmptyCellMoves(state);
@@ -801,7 +890,7 @@ function getUltimateMoves(state: GameState): GameMove[] {
   const meta = state.meta?.ultimate;
   if (!meta) return [];
   return getEmptyCellMoves(state).filter((move) => {
-    const mini = ultimateBoardIndex(move.row!, move.column);
+    const mini = ultimateBoardIndex(state, move.row!, move.column);
     return !meta.localWinners[mini] && (meta.activeBoard === null || meta.activeBoard === mini);
   });
 }
@@ -899,18 +988,18 @@ function getMorrisMoves(state: GameState, player: PlayerMark): GameMove[] {
 
 function resolveTarget(state: GameState, move: GameMove): { ok: true; point: BoardPoint } | { ok: false; reason: string } {
   const definition = getGameDefinition(state.gameId);
-  if (!Number.isInteger(move.column) || move.column < 0 || move.column >= definition.columns) {
+  if (!Number.isInteger(move.column) || move.column < 0 || move.column >= state.board[0].length) {
     return { ok: false, reason: "That move is outside the board." };
   }
 
   if (definition.moveMode === "drop-column") {
-    for (let row = definition.rows - 1; row >= 0; row -= 1) {
+    for (let row = state.board.length - 1; row >= 0; row -= 1) {
       if (!state.board[row][move.column]) return { ok: true, point: { row, column: move.column } };
     }
     return { ok: false, reason: "That column is full." };
   }
 
-  if (!Number.isInteger(move.row) || move.row === undefined || move.row < 0 || move.row >= definition.rows) {
+  if (!Number.isInteger(move.row) || move.row === undefined || move.row < 0 || move.row >= state.board.length) {
     return { ok: false, reason: "That move is outside the board." };
   }
   if (state.board[move.row][move.column]) return { ok: false, reason: "That spot is already taken." };
@@ -1086,8 +1175,8 @@ function pieceScore(state: GameState, player: PlayerMark): number {
 }
 
 function orderedMoves(state: GameState, moves: GameMove[]): GameMove[] {
-  const centerColumn = (getGameDefinition(state.gameId).columns - 1) / 2;
-  const centerRow = (getGameDefinition(state.gameId).rows - 1) / 2;
+  const centerColumn = (state.board[0].length - 1) / 2;
+  const centerRow = (state.board.length - 1) / 2;
   return [...moves].sort((a, b) => {
     const aDistance = Math.abs((a.row ?? centerRow) - centerRow) + Math.abs(a.column - centerColumn);
     const bDistance = Math.abs((b.row ?? centerRow) - centerRow) + Math.abs(b.column - centerColumn);
@@ -1177,46 +1266,61 @@ function rebuildPath(end: BoardPoint, cameFrom: Map<string, string | null>): Boa
   return path.reverse();
 }
 
-function localCells(board: Cell[][], mini: number): Cell[] {
-  const startRow = Math.floor(mini / 3) * 3;
-  const startColumn = (mini % 3) * 3;
+function localCells(state: GameState, board: Cell[][], mini: number): Cell[] {
+  const localSize = ultimateLocalSize(state);
+  const startRow = Math.floor(mini / localSize) * localSize;
+  const startColumn = (mini % localSize) * localSize;
   const cells: Cell[] = [];
-  for (let row = startRow; row < startRow + 3; row += 1) {
-    for (let column = startColumn; column < startColumn + 3; column += 1) cells.push(board[row][column]);
+  for (let row = startRow; row < startRow + localSize; row += 1) {
+    for (let column = startColumn; column < startColumn + localSize; column += 1) cells.push(board[row][column]);
   }
   return cells;
 }
 
-function findLocalTicLine(board: Cell[][], mini: number, player: PlayerMark): BoardPoint[] {
-  const startRow = Math.floor(mini / 3) * 3;
-  const startColumn = (mini % 3) * 3;
-  const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]
-  ];
+function findLocalTicLine(state: GameState, board: Cell[][], mini: number, player: PlayerMark): BoardPoint[] {
+  const localSize = ultimateLocalSize(state);
+  const startRow = Math.floor(mini / localSize) * localSize;
+  const startColumn = (mini % localSize) * localSize;
+  const lines = squareLines(localSize);
   for (const line of lines) {
-    const points = line.map((index) => ({ row: startRow + Math.floor(index / 3), column: startColumn + (index % 3) }));
+    const points = line.map((index) => ({ row: startRow + Math.floor(index / localSize), column: startColumn + (index % localSize) }));
     if (points.every((point) => cellAt(board, point) === player)) return points;
   }
   return [];
 }
 
-function findMetaLine(localWinners: Winner[], player: PlayerMark): number[] {
-  const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]
-  ];
+function findMetaLine(localWinners: Winner[], player: PlayerMark, localSize: number): number[] {
+  const lines = squareLines(localSize);
   return lines.find((line) => line.every((index) => localWinners[index] === player)) ?? [];
 }
 
-function miniCenterPoints(mini: number): BoardPoint[] {
-  return [{ row: Math.floor(mini / 3) * 3 + 1, column: (mini % 3) * 3 + 1 }];
+function miniCenterPoints(state: GameState, mini: number): BoardPoint[] {
+  const localSize = ultimateLocalSize(state);
+  const offset = Math.floor(localSize / 2);
+  return [{ row: Math.floor(mini / localSize) * localSize + offset, column: (mini % localSize) * localSize + offset }];
 }
 
-function ultimateBoardIndex(row: number, column: number): number {
-  return Math.floor(row / 3) * 3 + Math.floor(column / 3);
+function ultimateBoardIndex(state: GameState, row: number, column: number): number {
+  const localSize = ultimateLocalSize(state);
+  return Math.floor(row / localSize) * localSize + Math.floor(column / localSize);
 }
 
-function ultimateLocalIndex(row: number, column: number): number {
-  return (row % 3) * 3 + (column % 3);
+function ultimateLocalIndex(state: GameState, row: number, column: number): number {
+  const localSize = ultimateLocalSize(state);
+  return (row % localSize) * localSize + (column % localSize);
+}
+
+function squareLines(size: number): number[][] {
+  const lines: number[][] = [];
+  for (let row = 0; row < size; row += 1) {
+    lines.push(Array.from({ length: size }, (_, column) => row * size + column));
+  }
+  for (let column = 0; column < size; column += 1) {
+    lines.push(Array.from({ length: size }, (_, row) => row * size + column));
+  }
+  lines.push(Array.from({ length: size }, (_, index) => index * size + index));
+  lines.push(Array.from({ length: size }, (_, index) => index * size + (size - 1 - index)));
+  return lines;
 }
 
 function formsMill(board: Cell[][], point: BoardPoint, player: PlayerMark): boolean {

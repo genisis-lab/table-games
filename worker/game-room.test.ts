@@ -6,6 +6,7 @@ type ServerMessage = {
   room?: {
     roomId: string;
     gameId: string;
+    boardVariant?: string;
     board: Array<Array<string | null>>;
     players: Array<{ name: string; mark: string }>;
     chat: Array<{ body: string }>;
@@ -103,6 +104,26 @@ describe("GameRoom Durable Object", () => {
     const botMove = await waitForType(player, "move_applied");
     expect(botMove.move?.player).toBe("p2");
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
+  });
+
+  it("resets rooms when a seated player changes board variants", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "bot" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    await waitForType(player, "room_snapshot");
+
+    player.send(JSON.stringify({ type: "set_board_variant", variant: "wide" }));
+    const resized = await waitForType(player, "room_snapshot");
+
+    expect(resized.room?.boardVariant).toBe("wide");
+    expect(resized.room?.board).toHaveLength(5);
+    expect(resized.room?.board[0]).toHaveLength(5);
   });
 });
 

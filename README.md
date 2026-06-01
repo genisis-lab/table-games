@@ -21,7 +21,7 @@ V1 includes:
 - Live chat
 - Full-screen reaction bursts
 - Rematch and game switching
-- Resizable boards for Tic Tac Toe-style games and Dots and Boxes
+- Board-size rule variants for Tic Tac Toe-style games and Dots and Boxes
 
 ## Development
 

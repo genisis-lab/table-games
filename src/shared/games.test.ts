@@ -3,6 +3,7 @@ import {
   applyGameMove,
   chooseBotMove,
   createGameState,
+  getBoardVariantOptions,
   getGameDefinition,
   type Cell,
   type GameMove,
@@ -102,6 +103,23 @@ describe("Tic Tac Toe", () => {
 
     expect(state.winner).toBe("draw");
   });
+
+  it("supports larger board variants with longer connection goals", () => {
+    let state = createGameState("tic-tac-toe", "wide");
+    expect(state.board).toHaveLength(5);
+    expect(state.board[0]).toHaveLength(5);
+
+    state = play(state, "p1", { row: 0, column: 0 });
+    state = play(state, "p2", { row: 1, column: 0 });
+    state = play(state, "p1", { row: 0, column: 1 });
+    state = play(state, "p2", { row: 1, column: 1 });
+    state = play(state, "p1", { row: 0, column: 2 });
+    state = play(state, "p2", { row: 1, column: 2 });
+    state = play(state, "p1", { row: 0, column: 3 });
+
+    expect(state.winner).toBe("p1");
+    expect(state.winningLine).toHaveLength(4);
+  });
 });
 
 describe("Gomoku", () => {
@@ -150,6 +168,14 @@ describe("New game engines", () => {
     expect(state.meta?.ultimate?.localWinners[8]).toBe("p2");
   });
 
+  it("can create a larger Ultimate Tic Tac Toe variant", () => {
+    const state = createGameState("ultimate-tic-tac-toe", "wide");
+
+    expect(state.board).toHaveLength(16);
+    expect(state.meta?.ultimate?.localWinners).toHaveLength(16);
+    expect(getBoardVariantOptions("ultimate-tic-tac-toe").map((option) => option.label)).toEqual(["3x3", "4x4"]);
+  });
+
   it("scores completed boxes in Dots and Boxes without changing turns", () => {
     let state = createGameState("dots-and-boxes");
     state = play(state, "p1", { edge: "h", row: 0, column: 0 });
@@ -160,6 +186,14 @@ describe("New game engines", () => {
     expect(state.board[0][0]).toBe("p2");
     expect(state.turn).toBe("p2");
     expect(state.meta?.dots?.scores.p2).toBe(1);
+  });
+
+  it("supports larger Dots and Boxes variants", () => {
+    const state = createGameState("dots-and-boxes", "party");
+
+    expect(state.board).toHaveLength(6);
+    expect(state.meta?.dots?.hEdges).toHaveLength(7);
+    expect(state.meta?.dots?.vEdges[0]).toHaveLength(7);
   });
 
   it("flips captured discs in Reversi", () => {

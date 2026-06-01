@@ -7,6 +7,7 @@ import { GameRoomView } from "./GameRoomView";
 const room: RoomSnapshot = {
   roomId: "room-test",
   gameId: "four-in-a-row",
+  boardVariant: "classic",
   opponent: "friend",
   botDifficulty: "ruthless",
   players: [
@@ -73,6 +74,7 @@ describe("GameRoomView", () => {
         onReaction={onReaction}
         onRematch={onRematch}
         onSwitchGame={onSwitchGame}
+        onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={vi.fn()}
       />
     );
@@ -109,6 +111,7 @@ describe("GameRoomView", () => {
         onReaction={vi.fn()}
         onRematch={vi.fn()}
         onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={vi.fn()}
       />
     );
@@ -138,6 +141,7 @@ describe("GameRoomView", () => {
         onReaction={vi.fn()}
         onRematch={vi.fn()}
         onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={onSetBotDifficulty}
       />
     );
@@ -146,7 +150,8 @@ describe("GameRoomView", () => {
     expect(onSetBotDifficulty).toHaveBeenCalledWith("sharp");
   });
 
-  it("offers larger boards for Tic Tac Toe-style games", () => {
+  it("offers larger board-rule variants for Tic Tac Toe-style games", () => {
+    const onSetBoardVariant = vi.fn();
     render(
       <GameRoomView
         room={{
@@ -163,11 +168,12 @@ describe("GameRoomView", () => {
         onReaction={vi.fn()}
         onRematch={vi.fn()}
         onSwitchGame={vi.fn()}
+        onSetBoardVariant={onSetBoardVariant}
         onSetBotDifficulty={vi.fn()}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Huge board" }));
-    expect(screen.getByLabelText("Tic Tac Toe board").closest(".board-stage")).toHaveClass("size-huge");
+    fireEvent.click(screen.getByRole("button", { name: "5x5 board" }));
+    expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
   });
 });

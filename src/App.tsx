@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BotDifficulty, GameId, GameMove } from "./shared/games";
+import type { BotDifficulty, BoardVariant, GameId, GameMove } from "./shared/games";
 import { isGameId } from "./shared/games";
 import type { ClientMessage, RoomSnapshot, ServerMessage } from "./shared/protocol";
 import { GameRoomView } from "./ui/GameRoomView";
@@ -218,6 +218,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         onReaction={(emoji) => send({ type: "send_reaction", emoji })}
         onRematch={() => send({ type: "request_rematch" })}
         onSwitchGame={(gameId) => send({ type: "switch_game", gameId })}
+        onSetBoardVariant={(variant: BoardVariant) => send({ type: "set_board_variant", variant })}
         onSetBotDifficulty={(difficulty) => send({ type: "set_bot_difficulty", difficulty })}
       />
     </>

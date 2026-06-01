@@ -9,8 +9,8 @@ import {
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useMemo, useState } from "react";
-import type { BoardPoint, BotDifficulty, GameId, GameMove, PlayerMark } from "../shared/games";
-import { GAME_IDS, getGameDefinition } from "../shared/games";
+import type { BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
+import { GAME_IDS, getBoardVariantOptions, getGameDefinition } from "../shared/games";
 import { REACTIONS, type RoomSnapshot } from "../shared/protocol";
 
 interface GameRoomViewProps {
@@ -24,6 +24,7 @@ interface GameRoomViewProps {
   onReaction: (emoji: string) => void;
   onRematch: () => void;
   onSwitchGame: (gameId: GameId) => void;
+  onSetBoardVariant: (variant: BoardVariant) => void;
   onSetBotDifficulty: (difficulty: BotDifficulty) => void;
 }
 
@@ -38,11 +39,12 @@ export function GameRoomView({
   onReaction,
   onRematch,
   onSwitchGame,
+  onSetBoardVariant,
   onSetBotDifficulty
 }: GameRoomViewProps) {
   const [message, setMessage] = useState("");
-  const [boardSize, setBoardSize] = useState<"cozy" | "big" | "huge">("big");
   const definition = getGameDefinition(room.gameId);
+  const boardVariantOptions = getBoardVariantOptions(room.gameId);
   const currentPlayer = room.players.find((player) => player.guestToken === guestToken);
   const currentTurnPlayer = room.players.find((player) => player.mark === room.turn);
   const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
@@ -102,23 +104,24 @@ export function GameRoomView({
           </button>
         </header>
 
-        {canResizeBoard(room.gameId) ? (
+        {boardVariantOptions.length > 1 ? (
           <section className="board-size-toolbar" aria-label="Board size">
-            {(["cozy", "big", "huge"] as const).map((size) => (
+            {boardVariantOptions.map((option) => (
               <button
-                className={boardSize === size ? "mode-button active" : "mode-button"}
+                className={room.boardVariant === option.id ? "mode-button active" : "mode-button"}
                 type="button"
-                aria-label={`${size === "cozy" ? "Cozy" : size === "big" ? "Big" : "Huge"} board`}
-                onClick={() => setBoardSize(size)}
-                key={size}
+                aria-label={`${option.label} board`}
+                title={option.detail}
+                onClick={() => onSetBoardVariant(option.id)}
+                key={option.id}
               >
-                {size === "cozy" ? "Cozy" : size === "big" ? "Big" : "Huge"}
+                {option.label}
               </button>
             ))}
           </section>
         ) : null}
 
-        <section className={`board-stage ${room.gameId} size-${boardSize}`}>
+        <section className={`board-stage ${room.gameId} variant-${room.boardVariant}`}>
           <Board room={room} canMove={canMove} currentMark={currentPlayer?.mark} onMove={onMove} />
         </section>
 
@@ -316,7 +319,12 @@ function TicTacToeBoard({
   onMove: (move: GameMove) => void;
 }) {
   return (
-    <div className="tic-board" role="group" aria-label="Tic Tac Toe board">
+    <div
+      className="tic-board"
+      role="group"
+      aria-label="Tic Tac Toe board"
+      style={{ "--board-columns": room.board[0].length } as CSSProperties}
+    >
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => (
           <button
@@ -375,11 +383,17 @@ function UltimateTicTacToeBoard({
 }) {
   const activeBoard = room.meta?.ultimate?.activeBoard ?? null;
   const localWinners = room.meta?.ultimate?.localWinners ?? [];
+  const localSize = Math.sqrt(room.board.length);
   return (
-    <div className="ultimate-board" role="group" aria-label="Ultimate Tic Tac Toe board">
+    <div
+      className="ultimate-board"
+      role="group"
+      aria-label="Ultimate Tic Tac Toe board"
+      style={{ "--board-columns": room.board[0].length, "--local-size": localSize } as CSSProperties}
+    >
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => {
-          const mini = Math.floor(rowIndex / 3) * 3 + Math.floor(columnIndex / 3);
+          const mini = Math.floor(rowIndex / localSize) * localSize + Math.floor(columnIndex / localSize);
           const playable = activeBoard === null || activeBoard === mini;
           const claimed = Boolean(localWinners[mini]);
           return (
@@ -736,8 +750,4 @@ function modeLabel(difficulty: BotDifficulty): string {
   if (difficulty === "casual") return "Casual";
   if (difficulty === "sharp") return "Sharp";
   return "Ruthless";
-}
-
-function canResizeBoard(gameId: GameId): boolean {
-  return gameId === "tic-tac-toe" || gameId === "ultimate-tic-tac-toe" || gameId === "dots-and-boxes";
 }

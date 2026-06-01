@@ -1,6 +1,7 @@
 import type {
   BoardPoint,
   BotDifficulty,
+  BoardVariant,
   Cell,
   GameId,
   GameMove,
@@ -44,6 +45,7 @@ export interface ReactionEvent {
 export interface RoomSnapshot {
   roomId: string;
   gameId: GameId;
+  boardVariant: BoardVariant;
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
   players: RoomPlayer[];
@@ -67,6 +69,7 @@ export type ClientMessage =
   | { type: "send_reaction"; emoji: string }
   | { type: "request_rematch" }
   | { type: "switch_game"; gameId: GameId }
+  | { type: "set_board_variant"; variant: BoardVariant }
   | { type: "set_bot_difficulty"; difficulty: BotDifficulty };
 
 export type ServerMessage =

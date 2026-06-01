@@ -3,11 +3,14 @@ import {
   applyGameMove,
   chooseBotMove,
   createGameState,
+  getDefaultBoardVariant,
   getGameDefinition,
+  isBoardVariantForGame,
   isBotDifficulty,
   isGameId,
   supportsFriendMode,
   type BotDifficulty,
+  type BoardVariant,
   type GameId,
   type GameMove,
   type PlayerMark
@@ -29,6 +32,7 @@ export interface Env {
 interface StoredRoom {
   roomId: string;
   gameId: GameId;
+  boardVariant: BoardVariant;
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
   players: RoomPlayer[];
@@ -66,6 +70,7 @@ export class GameRoom extends DurableObject<Env> {
         gameId?: string;
         opponent?: string;
         botDifficulty?: string;
+        boardVariant?: string;
       };
       if (!body.gameId || !isGameId(body.gameId)) {
         return Response.json({ error: "Unknown game." }, { status: 400 });
@@ -74,11 +79,15 @@ export class GameRoom extends DurableObject<Env> {
       const opponent = supportsFriendMode(body.gameId)
         ? body.opponent === "bot" ? "bot" : "friend"
         : "bot";
+      const boardVariant = body.boardVariant && isBoardVariantForGame(body.gameId, body.boardVariant)
+        ? body.boardVariant
+        : getDefaultBoardVariant(body.gameId);
       const room = await this.loadRoom(
         roomId,
         body.gameId,
         opponent,
-        body.botDifficulty && isBotDifficulty(body.botDifficulty) ? body.botDifficulty : "ruthless"
+        body.botDifficulty && isBotDifficulty(body.botDifficulty) ? body.botDifficulty : "ruthless",
+        boardVariant
       );
       await this.saveRoom(room);
       return Response.json(this.snapshot(room), { status: 201 });
@@ -141,6 +150,9 @@ export class GameRoom extends DurableObject<Env> {
         return;
       case "switch_game":
         await this.handleSwitchGame(ws, room, attachment.guestToken, clientMessage.gameId);
+        return;
+      case "set_board_variant":
+        await this.handleSetBoardVariant(ws, room, attachment.guestToken, clientMessage.variant);
         return;
       case "set_bot_difficulty":
         await this.handleSetBotDifficulty(ws, room, attachment.guestToken, clientMessage.difficulty);
@@ -340,7 +352,7 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
-    room.game = createGameState(room.gameId);
+    room.game = createGameState(room.gameId, room.boardVariant);
     room.updatedAt = Date.now();
     await this.saveRoom(room);
     this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
@@ -386,7 +398,32 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     room.gameId = gameId;
-    room.game = createGameState(gameId);
+    room.boardVariant = getDefaultBoardVariant(gameId);
+    room.game = createGameState(gameId, room.boardVariant);
+    room.updatedAt = Date.now();
+    await this.saveRoom(room);
+    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    await this.maybePlayBot(room);
+  }
+
+  private async handleSetBoardVariant(
+    ws: WebSocket,
+    room: StoredRoom,
+    guestToken: string | undefined,
+    variant: BoardVariant
+  ): Promise<void> {
+    if (!this.findPlayer(room, guestToken)) {
+      this.send(ws, { type: "error", reason: "Only seated players can resize the board." });
+      return;
+    }
+
+    if (!isBoardVariantForGame(room.gameId, variant)) {
+      this.send(ws, { type: "error", reason: "That board size is not available for this game." });
+      return;
+    }
+
+    room.boardVariant = variant;
+    room.game = createGameState(room.gameId, variant);
     room.updatedAt = Date.now();
     await this.saveRoom(room);
     this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
@@ -466,7 +503,8 @@ export class GameRoom extends DurableObject<Env> {
     roomId: string,
     gameId: GameId = "four-in-a-row",
     opponent: "friend" | "bot" = "friend",
-    botDifficulty: BotDifficulty = "ruthless"
+    botDifficulty: BotDifficulty = "ruthless",
+    boardVariant: BoardVariant = getDefaultBoardVariant(gameId)
   ): Promise<StoredRoom> {
     if (this.room) return this.ensureRoomShape(this.room, roomId);
 
@@ -480,11 +518,12 @@ export class GameRoom extends DurableObject<Env> {
     this.room = {
       roomId,
       gameId,
+      boardVariant,
       opponent,
       botDifficulty,
       players: opponent === "bot" ? [createBotPlayer(roomId, now)] : [],
       spectators: [],
-      game: createGameState(gameId),
+      game: createGameState(gameId, boardVariant),
       chat: [],
       reactionEvents: [],
       createdAt: now,
@@ -502,6 +541,7 @@ export class GameRoom extends DurableObject<Env> {
     return {
       roomId: room.roomId,
       gameId: room.gameId,
+      boardVariant: room.boardVariant,
       opponent: room.opponent,
       botDifficulty: room.botDifficulty,
       players: [...room.players].sort((a, b) => a.mark.localeCompare(b.mark)),
@@ -522,6 +562,8 @@ export class GameRoom extends DurableObject<Env> {
   private ensureRoomShape(room: StoredRoom, roomId: string): StoredRoom {
     room.opponent ??= "friend";
     room.botDifficulty ??= "ruthless";
+    room.boardVariant ??= room.game?.boardVariant ?? getDefaultBoardVariant(room.gameId);
+    room.game.boardVariant ??= room.boardVariant;
 
     if (room.opponent === "bot" && !room.players.some((player) => player.isBot)) {
       room.players.push(createBotPlayer(roomId, Date.now()));
