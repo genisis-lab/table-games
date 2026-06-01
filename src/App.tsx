@@ -217,6 +217,8 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         onChat={(body) => send({ type: "send_chat", body })}
         onReaction={(emoji) => send({ type: "send_reaction", emoji })}
         onRematch={() => send({ type: "request_rematch" })}
+        onRequestUndo={() => send({ type: "request_undo" })}
+        onClaimSeat={() => send({ type: "claim_seat" })}
         onSwitchGame={(gameId) => send({ type: "switch_game", gameId })}
         onSetBoardVariant={(variant: BoardVariant) => send({ type: "set_board_variant", variant })}
         onSetBotDifficulty={(difficulty) => send({ type: "set_bot_difficulty", difficulty })}

@@ -11,6 +11,7 @@ import {
   supportsFriendMode,
   type BotDifficulty,
   type BoardVariant,
+  type GameState,
   type GameId,
   type GameMove,
   type PlayerMark
@@ -19,6 +20,7 @@ import type {
   ChatMessage,
   ClientMessage,
   ReactionEvent,
+  MoveRecord,
   RoomPlayer,
   RoomSnapshot,
   RoomSpectator,
@@ -38,8 +40,12 @@ interface StoredRoom {
   players: RoomPlayer[];
   spectators: RoomSpectator[];
   game: ReturnType<typeof createGameState>;
+  gameHistory: GameState[];
+  moveHistory: MoveRecord[];
   chat: ChatMessage[];
   reactionEvents: ReactionEvent[];
+  rematchRequests: string[];
+  undoRequests: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -147,6 +153,12 @@ export class GameRoom extends DurableObject<Env> {
         return;
       case "request_rematch":
         await this.handleRematch(ws, room, attachment.guestToken);
+        return;
+      case "request_undo":
+        await this.handleUndo(ws, room, attachment.guestToken);
+        return;
+      case "claim_seat":
+        await this.handleClaimSeat(ws, room, attachment.guestToken);
         return;
       case "switch_game":
         await this.handleSwitchGame(ws, room, attachment.guestToken, clientMessage.gameId);
@@ -263,7 +275,11 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
+    room.gameHistory = [...room.gameHistory, cloneGameState(room.game)].slice(-30);
     room.game = result.state;
+    room.moveHistory = [...room.moveHistory, createMoveRecord(player, move, result.point, room.gameId)].slice(-40);
+    room.undoRequests = [];
+    room.rematchRequests = [];
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
@@ -352,11 +368,95 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
-    room.game = createGameState(room.gameId, room.boardVariant);
+    if (room.opponent === "friend") {
+      addUnique(room.rematchRequests, guestToken);
+      if (!hasAllHumanPlayerVotes(room, room.rematchRequests)) {
+        room.updatedAt = Date.now();
+        await this.saveRoom(room);
+        this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+        return;
+      }
+    }
+
+    await this.resetGame(room);
+    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    await this.maybePlayBot(room);
+  }
+
+  private async handleUndo(
+    ws: WebSocket,
+    room: StoredRoom,
+    guestToken: string | undefined
+  ): Promise<void> {
+    if (!this.findPlayer(room, guestToken)) {
+      this.send(ws, { type: "error", reason: "Only seated players can request undo." });
+      return;
+    }
+
+    if (room.opponent !== "friend") {
+      this.send(ws, { type: "error", reason: "Undo requests are for friend rooms." });
+      return;
+    }
+
+    if (room.gameHistory.length === 0) {
+      this.send(ws, { type: "error", reason: "No move to undo yet." });
+      return;
+    }
+
+    addUnique(room.undoRequests, guestToken);
+    if (!hasAllHumanPlayerVotes(room, room.undoRequests)) {
+      room.updatedAt = Date.now();
+      await this.saveRoom(room);
+      this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+      return;
+    }
+
+    const previous = room.gameHistory.at(-1);
+    if (!previous) return;
+    room.game = previous;
+    room.gameHistory = room.gameHistory.slice(0, -1);
+    room.moveHistory = room.moveHistory.slice(0, -1);
+    room.undoRequests = [];
+    room.rematchRequests = [];
     room.updatedAt = Date.now();
     await this.saveRoom(room);
     this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
-    await this.maybePlayBot(room);
+  }
+
+  private async handleClaimSeat(
+    ws: WebSocket,
+    room: StoredRoom,
+    guestToken: string | undefined
+  ): Promise<void> {
+    const spectator = room.spectators.find((candidate) => candidate.guestToken === guestToken);
+    if (!spectator) {
+      this.send(ws, { type: "error", reason: "Only spectators can claim a seat." });
+      return;
+    }
+
+    const openPlayer = room.players.find((player) => !player.connected && !player.isBot);
+    const mark = openPlayer?.mark ?? availablePlayerMark(room);
+    if (!mark) {
+      this.send(ws, { type: "error", reason: "No seat is open yet." });
+      return;
+    }
+
+    room.players = room.players.filter((player) => player.mark !== mark);
+    room.players.push({
+      guestToken: spectator.guestToken,
+      name: spectator.name,
+      mark,
+      connected: true,
+      joinedAt: Date.now()
+    });
+    room.spectators = room.spectators.filter((candidate) => candidate.guestToken !== spectator.guestToken);
+    room.undoRequests = [];
+    room.rematchRequests = [];
+    room.updatedAt = Date.now();
+    await this.saveRoom(room);
+    const snapshot = this.snapshot(room);
+    this.send(ws, { type: "room_snapshot", room: snapshot });
+    this.broadcast({ type: "presence_changed", room: snapshot });
   }
 
   private async handleSwitchGame(
@@ -399,9 +499,7 @@ export class GameRoom extends DurableObject<Env> {
 
     room.gameId = gameId;
     room.boardVariant = getDefaultBoardVariant(gameId);
-    room.game = createGameState(gameId, room.boardVariant);
-    room.updatedAt = Date.now();
-    await this.saveRoom(room);
+    await this.resetGame(room);
     this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
     await this.maybePlayBot(room);
   }
@@ -423,9 +521,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     room.boardVariant = variant;
-    room.game = createGameState(room.gameId, variant);
-    room.updatedAt = Date.now();
-    await this.saveRoom(room);
+    await this.resetGame(room);
     this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
     await this.maybePlayBot(room);
   }
@@ -469,7 +565,11 @@ export class GameRoom extends DurableObject<Env> {
     const result = applyGameMove(room.game, bot.mark, move);
     if (!result.ok) return;
 
+    room.gameHistory = [...room.gameHistory, cloneGameState(room.game)].slice(-30);
     room.game = result.state;
+    room.moveHistory = [...room.moveHistory, createMoveRecord(bot, move, result.point, room.gameId)].slice(-40);
+    room.undoRequests = [];
+    room.rematchRequests = [];
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
@@ -524,8 +624,12 @@ export class GameRoom extends DurableObject<Env> {
       players: opponent === "bot" ? [createBotPlayer(roomId, now)] : [],
       spectators: [],
       game: createGameState(gameId, boardVariant),
+      gameHistory: [],
+      moveHistory: [],
       chat: [],
       reactionEvents: [],
+      rematchRequests: [],
+      undoRequests: [],
       createdAt: now,
       updatedAt: now
     };
@@ -554,6 +658,9 @@ export class GameRoom extends DurableObject<Env> {
       meta: room.game.meta,
       chat: room.chat,
       reactionEvents: room.reactionEvents,
+      moveHistory: room.moveHistory,
+      rematchRequests: room.rematchRequests,
+      undoRequests: room.undoRequests,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt
     };
@@ -564,12 +671,26 @@ export class GameRoom extends DurableObject<Env> {
     room.botDifficulty ??= "ruthless";
     room.boardVariant ??= room.game?.boardVariant ?? getDefaultBoardVariant(room.gameId);
     room.game.boardVariant ??= room.boardVariant;
+    room.gameHistory ??= [];
+    room.moveHistory ??= [];
+    room.rematchRequests ??= [];
+    room.undoRequests ??= [];
 
     if (room.opponent === "bot" && !room.players.some((player) => player.isBot)) {
       room.players.push(createBotPlayer(roomId, Date.now()));
     }
 
     return room;
+  }
+
+  private async resetGame(room: StoredRoom): Promise<void> {
+    room.game = createGameState(room.gameId, room.boardVariant);
+    room.gameHistory = [];
+    room.moveHistory = [];
+    room.undoRequests = [];
+    room.rematchRequests = [];
+    room.updatedAt = Date.now();
+    await this.saveRoom(room);
   }
 
   private broadcast(message: ServerMessage): void {
@@ -609,6 +730,53 @@ function createBotPlayer(roomId: string, joinedAt: number): RoomPlayer {
     joinedAt,
     isBot: true
   };
+}
+
+function createMoveRecord(
+  player: RoomPlayer,
+  move: GameMove,
+  point: { row: number; column: number },
+  gameId: GameId
+): MoveRecord {
+  return {
+    id: crypto.randomUUID(),
+    player: player.mark,
+    name: player.name,
+    label: moveLabel(move, point, gameId),
+    at: Date.now()
+  };
+}
+
+function moveLabel(move: GameMove, point: { row: number; column: number }, gameId: GameId): string {
+  if (gameId === "four-in-a-row") return `Column ${point.column + 1}`;
+  if (gameId === "dots-and-boxes") {
+    return `${move.edge === "h" ? "H" : "V"}${point.row + 1}-${point.column + 1}`;
+  }
+  if (gameId === "checkers" || gameId === "nine-mens-morris") {
+    const from = "row" in move && Number.isInteger(move.row)
+      ? `${columnName(move.column)}${(move.row ?? 0) + 1}`
+      : "";
+    const to = `${columnName(point.column)}${point.row + 1}`;
+    return from ? `${from}-${to}` : to;
+  }
+  return `${columnName(point.column)}${point.row + 1}`;
+}
+
+function columnName(column: number): string {
+  return String.fromCharCode(65 + column);
+}
+
+function addUnique(values: string[], value: string | undefined): void {
+  if (value && !values.includes(value)) values.push(value);
+}
+
+function hasAllHumanPlayerVotes(room: StoredRoom, votes: string[]): boolean {
+  const humans = room.players.filter((player) => !player.isBot && player.connected);
+  return humans.length > 0 && humans.every((player) => votes.includes(player.guestToken));
+}
+
+function cloneGameState(game: GameState): GameState {
+  return JSON.parse(JSON.stringify(game)) as GameState;
 }
 
 function availablePlayerMark(room: StoredRoom): PlayerMark | null {

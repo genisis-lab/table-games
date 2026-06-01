@@ -50,6 +50,9 @@ const room: RoomSnapshot = {
       at: 3
     }
   ],
+  moveHistory: [],
+  rematchRequests: [],
+  undoRequests: [],
   createdAt: 1,
   updatedAt: 3
 };
@@ -73,6 +76,8 @@ describe("GameRoomView", () => {
         onChat={onChat}
         onReaction={onReaction}
         onRematch={onRematch}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
         onSwitchGame={onSwitchGame}
         onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={vi.fn()}
@@ -110,6 +115,8 @@ describe("GameRoomView", () => {
         onChat={vi.fn()}
         onReaction={vi.fn()}
         onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
         onSwitchGame={vi.fn()}
         onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={vi.fn()}
@@ -140,6 +147,8 @@ describe("GameRoomView", () => {
         onChat={vi.fn()}
         onReaction={vi.fn()}
         onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
         onSwitchGame={vi.fn()}
         onSetBoardVariant={vi.fn()}
         onSetBotDifficulty={onSetBotDifficulty}
@@ -167,6 +176,8 @@ describe("GameRoomView", () => {
         onChat={vi.fn()}
         onReaction={vi.fn()}
         onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
         onSwitchGame={vi.fn()}
         onSetBoardVariant={onSetBoardVariant}
         onSetBotDifficulty={vi.fn()}
@@ -175,5 +186,105 @@ describe("GameRoomView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "5x5 board" }));
     expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
+  });
+
+  it("shows rules, move history, and undo requests", () => {
+    const onRequestUndo = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          board: room.board.map((row, rowIndex) =>
+            row.map((cell, columnIndex) => rowIndex === 5 && columnIndex === 0 ? "p1" : cell)
+          ),
+          moveHistory: [
+            { id: "move-1", player: "p1", name: "Ruby", label: "Column 1", at: 5 }
+          ],
+          undoRequests: ["red-token"]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={onRequestUndo}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Connect four pieces horizontally, vertically, or diagonally.")).toBeInTheDocument();
+    expect(screen.getByText("Column 1")).toBeInTheDocument();
+    expect(screen.getByText("Undo requested 1/2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Request undo" }));
+    expect(onRequestUndo).toHaveBeenCalled();
+  });
+
+  it("shows game-over celebration and rematch vote count", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          winner: "p1",
+          rematchRequests: ["red-token"]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText("Red wins")).toHaveLength(2);
+    expect(screen.getByText("Rematch vote 1/2")).toBeInTheDocument();
+  });
+
+  it("lets spectators claim an open seat", () => {
+    const onClaimSeat = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          players: [
+            room.players[0],
+            { ...room.players[1], connected: false }
+          ],
+          spectators: [
+            { guestToken: "watch-token", name: "Wally", connected: true, joinedAt: 4 }
+          ]
+        }}
+        guestToken="watch-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={onClaimSeat}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Spectators")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Take open seat" }));
+    expect(onClaimSeat).toHaveBeenCalled();
   });
 });

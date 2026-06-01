@@ -22,6 +22,7 @@ V1 includes:
 - Full-screen reaction bursts
 - Rematch and game switching
 - Board-size rule variants for Tic Tac Toe-style games and Dots and Boxes
+- Rules cards, move history, undo requests, rematch voting, and spectator seat claiming
 
 ## Development
 

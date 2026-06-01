@@ -1236,10 +1236,13 @@ button:disabled {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto;
+  align-content: start;
   gap: 14px;
   padding: 14px;
   min-width: 0;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
 }
 
 .invite-strip {
@@ -1287,11 +1290,24 @@ button:disabled {
   gap: 9px;
 }
 
-.bot-strip {
+.bot-strip,
+.rules-strip,
+.history-strip,
+.spectator-strip {
   display: grid;
   gap: 8px;
   padding-bottom: 12px;
   border-bottom: 2px dashed rgb(24 34 41 / 24%);
+}
+
+.rules-strip p,
+.bot-personality,
+.quiet-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.35;
 }
 
 .bot-modes {
@@ -1363,6 +1379,76 @@ button:disabled {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.move-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.move-list li,
+.spectator-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 2px solid rgb(24 34 41 / 16%);
+  border-radius: var(--radius);
+  background: #fff;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.move-list li.p1 {
+  border-left: 6px solid var(--red);
+}
+
+.move-list li.p2 {
+  border-left: 6px solid var(--yellow);
+}
+
+.move-list strong,
+.spectator-row small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.compact-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.game-over-banner {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--yellow);
+  box-shadow: var(--shadow);
+  font-weight: 850;
+}
+
+.game-over-banner strong {
+  font-size: 1.05rem;
+}
+
+.game-over-banner span {
+  color: #334049;
 }
 
 .chat-log {
@@ -1540,14 +1626,18 @@ button:disabled {
   .chat-panel {
     grid-column: 1 / -1;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto minmax(220px, 1fr);
+    grid-template-rows: auto;
+    max-height: none;
   }
 
   .chat-log {
     grid-column: 1 / -1;
   }
 
-  .bot-strip {
+  .bot-strip,
+  .rules-strip,
+  .history-strip,
+  .spectator-strip {
     grid-column: 1 / -1;
   }
 }
@@ -1623,6 +1713,14 @@ button:disabled {
 
   .reaction-dock {
     flex-wrap: wrap;
+  }
+
+  .game-over-banner {
+    grid-template-columns: auto 1fr;
+  }
+
+  .game-over-banner span {
+    grid-column: 1 / -1;
   }
 
   .board-stage {

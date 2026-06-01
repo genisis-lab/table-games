@@ -8,8 +8,12 @@ type ServerMessage = {
     gameId: string;
     boardVariant?: string;
     board: Array<Array<string | null>>;
-    players: Array<{ name: string; mark: string }>;
+    players: Array<{ name: string; mark: string; guestToken?: string }>;
+    spectators: Array<{ name: string; guestToken?: string }>;
     chat: Array<{ body: string }>;
+    moveHistory: Array<{ player: string; label: string }>;
+    rematchRequests: string[];
+    undoRequests: string[];
   };
   move?: { player: string; row: number; column: number };
   chat?: { body: string };
@@ -125,6 +129,100 @@ describe("GameRoom Durable Object", () => {
     expect(resized.room?.board).toHaveLength(5);
     expect(resized.room?.board[0]).toHaveLength(5);
   });
+
+  it("tracks move history and requires both friend players for undo", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const x = await openRoomSocket(roomId);
+    const o = await openRoomSocket(roomId);
+    x.send(JSON.stringify({ type: "join", guestToken: "token-x", name: "Xena" }));
+    await waitForType(x, "room_snapshot");
+    o.send(JSON.stringify({ type: "join", guestToken: "token-o", name: "Omar" }));
+    await waitForType(o, "room_snapshot");
+
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    const moved = await waitForType(o, "move_applied");
+    expect(moved.room?.moveHistory).toMatchObject([{ player: "p1", label: "A1" }]);
+
+    x.send(JSON.stringify({ type: "request_undo" }));
+    const requested = await waitForType(o, "room_snapshot");
+    expect(requested.room?.undoRequests).toEqual(["token-x"]);
+    expect(requested.room?.board[0][0]).toBe("p1");
+
+    o.send(JSON.stringify({ type: "request_undo" }));
+    const undone = await waitForRoomWhere(x, (room) =>
+      room.undoRequests.length === 0 && room.moveHistory.length === 0
+    );
+    expect(undone.room?.undoRequests).toEqual([]);
+    expect(undone.room?.moveHistory).toHaveLength(0);
+    expect(undone.room?.board[0][0]).toBe(null);
+  });
+
+  it("votes for rematches in friend rooms before resetting", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const x = await openRoomSocket(roomId);
+    const o = await openRoomSocket(roomId);
+    x.send(JSON.stringify({ type: "join", guestToken: "token-x", name: "Xena" }));
+    await waitForType(x, "room_snapshot");
+    o.send(JSON.stringify({ type: "join", guestToken: "token-o", name: "Omar" }));
+    await waitForType(o, "room_snapshot");
+
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    await waitForType(o, "move_applied");
+    x.send(JSON.stringify({ type: "request_rematch" }));
+    const waiting = await waitForType(o, "room_snapshot");
+    expect(waiting.room?.rematchRequests).toEqual(["token-x"]);
+    expect(waiting.room?.board[0][0]).toBe("p1");
+
+    o.send(JSON.stringify({ type: "request_rematch" }));
+    const resetRoom = await waitForRoomWhere(x, (room) =>
+      room.rematchRequests.length === 0 && room.board.flat().filter(Boolean).length === 0
+    );
+    expect(resetRoom.room?.rematchRequests).toEqual([]);
+    expect(resetRoom.room?.board.flat().filter(Boolean)).toHaveLength(0);
+  });
+
+  it("lets a spectator claim an open seat", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "four-in-a-row", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const red = await openRoomSocket(roomId);
+    const yellow = await openRoomSocket(roomId);
+    const watcher = await openRoomSocket(roomId);
+    red.send(JSON.stringify({ type: "join", guestToken: "token-red", name: "Ruby" }));
+    await waitForType(red, "room_snapshot");
+    yellow.send(JSON.stringify({ type: "join", guestToken: "token-yellow", name: "Sunny" }));
+    await waitForType(yellow, "room_snapshot");
+    watcher.send(JSON.stringify({ type: "join", guestToken: "token-watch", name: "Wally" }));
+    const spectatorSnapshot = await waitForType(watcher, "room_snapshot");
+    expect(spectatorSnapshot.room?.spectators).toMatchObject([{ name: "Wally" }]);
+
+    yellow.close();
+    await waitForType(red, "presence_changed");
+    watcher.send(JSON.stringify({ type: "claim_seat" }));
+    const claimed = await waitForRoomWhere(red, (room) =>
+      room.players.some((player) => player.name === "Wally" && player.mark === "p2")
+    );
+    expect(claimed.room?.players).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Wally", mark: "p2" })])
+    );
+    expect(claimed.room?.spectators).toHaveLength(0);
+  });
 });
 
 async function openRoomSocket(roomId: string): Promise<WebSocket> {
@@ -139,6 +237,26 @@ async function openRoomSocket(roomId: string): Promise<WebSocket> {
   if (!socket) throw new Error("Expected WebSocket response.");
   socket.accept();
   return socket;
+}
+
+function waitForRoomWhere(
+  socket: WebSocket,
+  predicate: (room: NonNullable<ServerMessage["room"]>) => boolean
+): Promise<ServerMessage> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for matching room")), 1000);
+
+    const onMessage = (event: MessageEvent) => {
+      const message = JSON.parse(String(event.data)) as ServerMessage;
+      if (!message.room || !predicate(message.room)) return;
+
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+      resolve(message);
+    };
+
+    socket.addEventListener("message", onMessage);
+  });
 }
 
 function waitForType(socket: WebSocket, type: string): Promise<ServerMessage> {

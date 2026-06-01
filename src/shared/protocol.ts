@@ -42,6 +42,14 @@ export interface ReactionEvent {
   at: number;
 }
 
+export interface MoveRecord {
+  id: string;
+  player: PlayerMark;
+  name: string;
+  label: string;
+  at: number;
+}
+
 export interface RoomSnapshot {
   roomId: string;
   gameId: GameId;
@@ -58,6 +66,9 @@ export interface RoomSnapshot {
   meta?: GameMeta;
   chat: ChatMessage[];
   reactionEvents: ReactionEvent[];
+  moveHistory: MoveRecord[];
+  rematchRequests: string[];
+  undoRequests: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -68,6 +79,8 @@ export type ClientMessage =
   | { type: "send_chat"; body: string }
   | { type: "send_reaction"; emoji: string }
   | { type: "request_rematch" }
+  | { type: "request_undo" }
+  | { type: "claim_seat" }
   | { type: "switch_game"; gameId: GameId }
   | { type: "set_board_variant"; variant: BoardVariant }
   | { type: "set_bot_difficulty"; difficulty: BotDifficulty };

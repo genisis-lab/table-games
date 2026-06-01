@@ -1,11 +1,15 @@
 import {
   Bot,
   Copy,
+  Eye,
+  HelpCircle,
+  History,
   Home,
   MessageCircle,
   RotateCcw,
   Send,
   Sparkles,
+  Undo2,
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useMemo, useState } from "react";
@@ -23,6 +27,8 @@ interface GameRoomViewProps {
   onChat: (body: string) => void;
   onReaction: (emoji: string) => void;
   onRematch: () => void;
+  onRequestUndo: () => void;
+  onClaimSeat: () => void;
   onSwitchGame: (gameId: GameId) => void;
   onSetBoardVariant: (variant: BoardVariant) => void;
   onSetBotDifficulty: (difficulty: BotDifficulty) => void;
@@ -38,6 +44,8 @@ export function GameRoomView({
   onChat,
   onReaction,
   onRematch,
+  onRequestUndo,
+  onClaimSeat,
   onSwitchGame,
   onSetBoardVariant,
   onSetBotDifficulty
@@ -47,6 +55,19 @@ export function GameRoomView({
   const boardVariantOptions = getBoardVariantOptions(room.gameId);
   const currentPlayer = room.players.find((player) => player.guestToken === guestToken);
   const currentTurnPlayer = room.players.find((player) => player.mark === room.turn);
+  const humanPlayers = room.players.filter((player) => !player.isBot);
+  const connectedHumanPlayers = humanPlayers.filter((player) => player.connected);
+  const voteTarget = room.opponent === "friend" ? Math.max(1, connectedHumanPlayers.length) : 1;
+  const rematchText = room.rematchRequests.length > 0 && room.opponent === "friend"
+    ? `Rematch vote ${room.rematchRequests.length}/${voteTarget}`
+    : "Rematch";
+  const undoText = room.undoRequests.length > 0
+    ? `Undo requested ${room.undoRequests.length}/${voteTarget}`
+    : "Undo";
+  const openSeat = room.opponent === "friend" && (
+    room.players.some((player) => !player.connected && !player.isBot) ||
+    room.players.filter((player) => !player.isBot).length < 2
+  );
   const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
   const status = room.winner
     ? room.winner === "draw"
@@ -100,9 +121,19 @@ export function GameRoomView({
           <div className="status-chip">{status}</div>
           <button className="icon-text-button" type="button" onClick={onRematch}>
             <RotateCcw size={18} />
-            Rematch
+            {rematchText}
           </button>
         </header>
+
+        {room.winner ? (
+          <section className="game-over-banner" aria-label="Game over">
+            <Sparkles size={20} />
+            <strong>
+              {room.winner === "draw" ? "Draw table" : `${definition.playerNames[room.winner]} wins`}
+            </strong>
+            <span>{room.winner === "draw" ? "Everybody gets the dramatic stare." : "The table has chosen a legend."}</span>
+          </section>
+        ) : null}
 
         {boardVariantOptions.length > 1 ? (
           <section className="board-size-toolbar" aria-label="Board size">
@@ -168,6 +199,7 @@ export function GameRoomView({
         {room.opponent === "bot" ? (
           <section className="bot-strip" aria-label="Bot mode">
             <div className="section-title"><Bot size={16} /> Bot mode</div>
+            <p className="bot-personality">{botPersonality(room.botDifficulty, room.gameId)}</p>
             <div className="bot-modes">
               {(["casual", "sharp", "ruthless"] as const).map((difficulty) => (
                 <button
@@ -181,6 +213,50 @@ export function GameRoomView({
                 </button>
               ))}
             </div>
+          </section>
+        ) : null}
+
+        <section className="rules-strip" aria-label="Rules">
+          <div className="section-title"><HelpCircle size={16} /> Rules</div>
+          <p>{rulesFor(room.gameId)}</p>
+        </section>
+
+        <section className="history-strip" aria-label="Move history">
+          <div className="section-title"><History size={16} /> Moves</div>
+          {room.moveHistory.length > 0 ? (
+            <ol className="move-list">
+              {room.moveHistory.slice(-6).map((move) => (
+                <li className={move.player} key={move.id}>
+                  <span>{move.name}</span>
+                  <strong>{move.label}</strong>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="quiet-note">No moves yet.</p>
+          )}
+          {currentPlayer && room.opponent === "friend" ? (
+            <button className="ghost-button compact-action" type="button" aria-label="Request undo" onClick={onRequestUndo}>
+              <Undo2 size={16} />
+              {undoText}
+            </button>
+          ) : null}
+        </section>
+
+        {room.spectators.length > 0 || (!currentPlayer && openSeat) ? (
+          <section className="spectator-strip" aria-label="Spectators">
+            <div className="section-title"><Eye size={16} /> Spectators</div>
+            {room.spectators.map((spectator) => (
+              <div className="spectator-row" key={spectator.guestToken}>
+                <span>{spectator.name}</span>
+                <small>{spectator.connected ? "watching" : "away"}</small>
+              </div>
+            ))}
+            {!currentPlayer && openSeat ? (
+              <button className="primary-button compact-action" type="button" onClick={onClaimSeat}>
+                Take open seat
+              </button>
+            ) : null}
           </section>
         ) : null}
 
@@ -750,4 +826,26 @@ function modeLabel(difficulty: BotDifficulty): string {
   if (difficulty === "casual") return "Casual";
   if (difficulty === "sharp") return "Sharp";
   return "Ruthless";
+}
+
+function rulesFor(gameId: GameId): string {
+  if (gameId === "four-in-a-row") return "Connect four pieces horizontally, vertically, or diagonally.";
+  if (gameId === "tic-tac-toe") return "Claim the needed line on your selected grid size before the other marker does.";
+  if (gameId === "gomoku") return "Place stones on intersections. First five or more connected stones wins.";
+  if (gameId === "ultimate-tic-tac-toe") return "Your move sends the opponent to the matching small board. Win small boards to win the big board.";
+  if (gameId === "dots-and-boxes") return "Draw lines between dots. Complete a box to score it and keep the turn.";
+  if (gameId === "reversi") return "Place a disc to trap opponent discs in a line. Trapped discs flip to your side.";
+  if (gameId === "checkers") return "Move diagonally on dark squares, jump captures, and crown kings on the far edge.";
+  if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
+  if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
+  if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
+  return "Place nine pieces, form mills of three, then slide pieces and remove opponent pieces.";
+}
+
+function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
+  if (difficulty === "casual") return "Loose and playful. It sees obvious wins but leaves room for drama.";
+  if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
+  return gameId === "battleship"
+    ? "Cold sonar mode. It hunts patterns and celebrates every hit internally."
+    : "Ruthless table brain. It searches for wins, blocks traps, and prefers center control.";
 }
