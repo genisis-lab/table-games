@@ -29,58 +29,64 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
         <div className="lobby-copy">
           <h1 id="lobby-title">Table Sparks</h1>
           <p>
-            Quick 1v1 board-game rooms with invite links, live chat, and ridiculous reaction
-            storms.
+            Board-game tables for quick bot duels or invite-link friend matches, with chat and
+            reaction storms baked in.
           </p>
           <div className="feature-row">
-            <span><UsersRound size={18} /> Guest seats</span>
-            <span><Link2 size={18} /> Copy invite</span>
-            <span><Sparkles size={18} /> Screen-filling reactions</span>
+            <span><Bot size={18} /> Smart bots</span>
+            <span><UsersRound size={18} /> Friend seats</span>
+            <span><Sparkles size={18} /> Reaction bursts</span>
           </div>
         </div>
 
-        <div className="game-stack" aria-label="Choose a game">
-          {GAME_IDS.map((gameId) => {
-            const definition = getGameDefinition(gameId);
-            return (
-              <article className={`game-poster ${gameId}`} key={gameId}>
-                <GamePreview gameId={gameId} />
-                <div>
-                  <h2>{definition.name}</h2>
-                  <p>{descriptionFor(gameId)}</p>
-                </div>
-                <div className="poster-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => onCreateRoom(gameId, {
-                      opponent: "bot",
-                      botDifficulty: "ruthless"
-                    })}
-                    disabled={creatingGameId === gameId}
-                    aria-label={`Play ${definition.name} against bot`}
-                  >
-                    <Bot size={18} />
-                    Bot
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => onCreateRoom(gameId, {
-                      opponent: "friend",
-                      botDifficulty: "ruthless"
-                    })}
-                    disabled={creatingGameId === gameId}
-                    aria-label={`Invite friend to ${definition.name}`}
-                  >
-                    Friend
-                    <ChevronRight size={18} />
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        <section className="game-library" aria-label="Choose a game">
+          <div className="library-heading">
+            <span>{GAME_IDS.length} tables live</span>
+            <strong>Game shelf</strong>
+          </div>
+          <div className="game-stack">
+            {GAME_IDS.map((gameId) => {
+              const definition = getGameDefinition(gameId);
+              return (
+                <article className={`game-poster ${gameId}`} key={gameId}>
+                  <GamePreview gameId={gameId} />
+                  <div className="game-copy">
+                    <h2>{definition.name}</h2>
+                    <p>{descriptionFor(gameId)}</p>
+                  </div>
+                  <div className="poster-actions">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => onCreateRoom(gameId, {
+                        opponent: "bot",
+                        botDifficulty: "ruthless"
+                      })}
+                      disabled={creatingGameId === gameId}
+                      aria-label={`Play ${definition.name} against bot`}
+                    >
+                      <Bot size={18} />
+                      Bot
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => onCreateRoom(gameId, {
+                        opponent: "friend",
+                        botDifficulty: "ruthless"
+                      })}
+                      disabled={creatingGameId === gameId}
+                      aria-label={`Invite friend to ${definition.name}`}
+                    >
+                      Friend
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       </section>
     </main>
   );
