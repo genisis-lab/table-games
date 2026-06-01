@@ -8,6 +8,7 @@ import {
   isBoardVariantForGame,
   isBotDifficulty,
   isGameId,
+  isSoloGame,
   supportsFriendMode,
   type BotDifficulty,
   type BoardVariant,
@@ -19,6 +20,7 @@ import {
 import type {
   ChatMessage,
   ClientMessage,
+  AppliedMove,
   ReactionEvent,
   MoveRecord,
   RoomPlayer,
@@ -59,6 +61,7 @@ const ROOM_KEY = "room";
 const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
 const BOT_NAME = "Spark Bot";
+const BOT_MOVE_DELAY_MS = 520;
 
 export class GameRoom extends DurableObject<Env> {
   private room: StoredRoom | null = null;
@@ -287,7 +290,7 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast({
       type: "move_applied",
       room: snapshot,
-      move: { ...result.point, player: player.mark }
+      move: createAppliedMove(player.mark, move, result.point)
     });
 
     if (snapshot.winner) {
@@ -475,26 +478,10 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
-    if (!supportsFriendMode(gameId) && room.opponent !== "bot") {
+    if (!supportsFriendMode(gameId)) {
       room.opponent = "bot";
-      const now = Date.now();
-      const existingBot = room.players.find((roomPlayer) => roomPlayer.isBot);
-      if (existingBot) {
-        existingBot.mark = "p2";
-        existingBot.connected = true;
-      } else {
-        const displaced = room.players.find((roomPlayer) => roomPlayer.mark === "p2" && !roomPlayer.isBot);
-        if (displaced) {
-          room.spectators.push({
-            guestToken: displaced.guestToken,
-            name: displaced.name,
-            connected: displaced.connected,
-            joinedAt: displaced.joinedAt
-          });
-          room.players = room.players.filter((roomPlayer) => roomPlayer !== displaced);
-        }
-        room.players.push(createBotPlayer(room.roomId, now));
-      }
+      if (isSoloGame(gameId)) prepareSoloPlayers(room);
+      else ensureBotOpponent(room);
     }
 
     room.gameId = gameId;
@@ -559,6 +546,8 @@ export class GameRoom extends DurableObject<Env> {
     const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
     if (!bot) return;
 
+    await sleep(BOT_MOVE_DELAY_MS);
+
     const move = chooseBotMove(room.game, bot.mark, room.botDifficulty);
     if (!move) return;
 
@@ -577,7 +566,7 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast({
       type: "move_applied",
       room: snapshot,
-      move: { ...result.point, player: bot.mark }
+      move: createAppliedMove(bot.mark, move, result.point)
     });
 
     if (snapshot.winner) {
@@ -621,7 +610,7 @@ export class GameRoom extends DurableObject<Env> {
       boardVariant,
       opponent,
       botDifficulty,
-      players: opponent === "bot" ? [createBotPlayer(roomId, now)] : [],
+      players: opponent === "bot" && !isSoloGame(gameId) ? [createBotPlayer(roomId, now)] : [],
       spectators: [],
       game: createGameState(gameId, boardVariant),
       gameHistory: [],
@@ -676,7 +665,9 @@ export class GameRoom extends DurableObject<Env> {
     room.rematchRequests ??= [];
     room.undoRequests ??= [];
 
-    if (room.opponent === "bot" && !room.players.some((player) => player.isBot)) {
+    if (isSoloGame(room.gameId)) {
+      prepareSoloPlayers(room);
+    } else if (room.opponent === "bot" && !room.players.some((player) => player.isBot)) {
       room.players.push(createBotPlayer(roomId, Date.now()));
     }
 
@@ -747,6 +738,21 @@ function createMoveRecord(
   };
 }
 
+function createAppliedMove(
+  player: PlayerMark,
+  move: GameMove,
+  point: { row: number; column: number }
+): AppliedMove {
+  return {
+    ...point,
+    player,
+    edge: move.edge,
+    toRow: move.toRow,
+    toColumn: move.toColumn,
+    at: Date.now()
+  };
+}
+
 function moveLabel(move: GameMove, point: { row: number; column: number }, gameId: GameId): string {
   if (gameId === "four-in-a-row") return `Column ${point.column + 1}`;
   if (gameId === "dots-and-boxes") {
@@ -780,9 +786,53 @@ function cloneGameState(game: GameState): GameState {
 }
 
 function availablePlayerMark(room: StoredRoom): PlayerMark | null {
+  if (isSoloGame(room.gameId)) {
+    return room.players.some((player) => !player.isBot) ? null : "p1";
+  }
   if (!room.players.some((player) => player.mark === "p1")) return "p1";
   if (!room.players.some((player) => player.mark === "p2")) return "p2";
   return null;
+}
+
+function prepareSoloPlayers(room: StoredRoom): void {
+  const humans = room.players.filter((player) => !player.isBot);
+  const keeper = humans.find((player) => player.mark === "p1") ?? humans[0];
+  const displaced = humans.filter((player) => player !== keeper);
+
+  room.players = keeper ? [{ ...keeper, mark: "p1" }] : [];
+  for (const player of displaced) {
+    room.spectators.push(toSpectator(player));
+  }
+}
+
+function ensureBotOpponent(room: StoredRoom): void {
+  const displaced = room.players.find((roomPlayer) => roomPlayer.mark === "p2" && !roomPlayer.isBot);
+  if (displaced) {
+    room.spectators.push(toSpectator(displaced));
+    room.players = room.players.filter((roomPlayer) => roomPlayer !== displaced);
+  }
+
+  const existingBot = room.players.find((roomPlayer) => roomPlayer.isBot);
+  if (existingBot) {
+    existingBot.mark = "p2";
+    existingBot.connected = true;
+    return;
+  }
+
+  room.players.push(createBotPlayer(room.roomId, Date.now()));
+}
+
+function toSpectator(player: RoomPlayer): RoomSpectator {
+  return {
+    guestToken: player.guestToken,
+    name: player.name,
+    connected: player.connected,
+    joinedAt: player.joinedAt
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function roomLabel(mark: PlayerMark, gameId: GameId): string {

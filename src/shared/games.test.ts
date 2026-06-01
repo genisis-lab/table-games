@@ -5,6 +5,7 @@ import {
   createGameState,
   getBoardVariantOptions,
   getGameDefinition,
+  isSoloGame,
   type Cell,
   type GameMove,
   type GameState
@@ -188,6 +189,20 @@ describe("New game engines", () => {
     expect(state.meta?.dots?.scores.p2).toBe(1);
   });
 
+  it("chooses a safe Dots and Boxes edge instead of handing over a nearly finished square", () => {
+    const state = createGameState("dots-and-boxes");
+    state.meta!.dots!.hEdges[1][1] = true;
+    state.meta!.dots!.vEdges[1][1] = true;
+
+    const move = chooseBotMove(state, "p1", "casual");
+
+    expect(move).toBeTruthy();
+    expect([
+      { edge: "h", row: 2, column: 1 },
+      { edge: "v", row: 1, column: 2 }
+    ]).not.toContainEqual(move);
+  });
+
   it("supports larger Dots and Boxes variants", () => {
     const state = createGameState("dots-and-boxes", "party");
 
@@ -221,6 +236,18 @@ describe("New game engines", () => {
 
     const next = play(state, "p1", { row: firstShip!.row, column: firstShip!.column });
     expect(next.meta?.battleship?.humanShots[`${firstShip!.row},${firstShip!.column}`]).toBe("hit");
+  });
+
+  it("registers Flappy Bird as a solo arcade game", () => {
+    const state = createGameState("flappy-bird");
+
+    expect(getGameDefinition("flappy-bird")).toMatchObject({
+      name: "Flappy Bird",
+      supportsFriend: false
+    });
+    expect(isSoloGame("flappy-bird")).toBe(true);
+    expect(state.board).toEqual([[null]]);
+    expect(chooseBotMove(state, "p2", "ruthless")).toBeNull();
   });
 
   it("sows stones and updates stores in Mancala", () => {

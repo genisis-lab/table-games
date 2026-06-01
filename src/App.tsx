@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BotDifficulty, BoardVariant, GameId, GameMove } from "./shared/games";
 import { isGameId } from "./shared/games";
-import type { ClientMessage, RoomSnapshot, ServerMessage } from "./shared/protocol";
+import type { AppliedMove, ClientMessage, RoomSnapshot, ServerMessage } from "./shared/protocol";
 import { GameRoomView } from "./ui/GameRoomView";
 import { Lobby } from "./ui/Lobby";
 
@@ -138,6 +138,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const [lastMove, setLastMove] = useState<AppliedMove | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const errorTimerRef = useRef<number | null>(null);
 
@@ -168,6 +169,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         setRoom(message.room);
         setError(null);
       }
+      if (message.type === "move_applied") setLastMove(message.move);
       if (message.type === "error") showError(message.reason);
     });
 
@@ -208,6 +210,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         guestToken={guestToken}
         inviteUrl={inviteUrl}
         copiedInvite={copiedInvite}
+        lastMove={lastMove}
         onCopyInvite={async () => {
           await navigator.clipboard?.writeText(inviteUrl);
           setCopiedInvite(true);

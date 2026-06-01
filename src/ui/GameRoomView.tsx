@@ -12,16 +12,17 @@ import {
   Undo2,
   UsersRound
 } from "lucide-react";
-import { type CSSProperties, type FormEvent, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
-import { GAME_IDS, getBoardVariantOptions, getGameDefinition } from "../shared/games";
-import { REACTIONS, type RoomSnapshot } from "../shared/protocol";
+import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame } from "../shared/games";
+import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 
 interface GameRoomViewProps {
   room: RoomSnapshot;
   guestToken: string;
   inviteUrl: string;
   copiedInvite: boolean;
+  lastMove?: AppliedMove | null;
   onCopyInvite: () => void;
   onMove: (move: GameMove) => void;
   onChat: (body: string) => void;
@@ -39,6 +40,7 @@ export function GameRoomView({
   guestToken,
   inviteUrl,
   copiedInvite,
+  lastMove = null,
   onCopyInvite,
   onMove,
   onChat,
@@ -52,6 +54,7 @@ export function GameRoomView({
 }: GameRoomViewProps) {
   const [message, setMessage] = useState("");
   const definition = getGameDefinition(room.gameId);
+  const solo = isSoloGame(room.gameId);
   const boardVariantOptions = getBoardVariantOptions(room.gameId);
   const currentPlayer = room.players.find((player) => player.guestToken === guestToken);
   const currentTurnPlayer = room.players.find((player) => player.mark === room.turn);
@@ -69,7 +72,9 @@ export function GameRoomView({
     room.players.filter((player) => !player.isBot).length < 2
   );
   const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
-  const status = room.winner
+  const status = solo
+    ? "Solo run"
+    : room.winner
     ? room.winner === "draw"
       ? "Draw table"
       : `${definition.playerNames[room.winner]} wins`
@@ -153,7 +158,7 @@ export function GameRoomView({
         ) : null}
 
         <section className={`board-stage ${room.gameId} variant-${room.boardVariant}`}>
-          <Board room={room} canMove={canMove} currentMark={currentPlayer?.mark} onMove={onMove} />
+          <Board room={room} canMove={canMove} currentMark={currentPlayer?.mark} lastMove={lastMove} onMove={onMove} />
         </section>
 
         <section className="reaction-dock" aria-label="Reactions">
@@ -196,7 +201,7 @@ export function GameRoomView({
           {currentPlayer ? <p className="seat-note">You are {definition.playerNames[currentPlayer.mark]}.</p> : null}
         </section>
 
-        {room.opponent === "bot" ? (
+        {room.opponent === "bot" && !solo ? (
           <section className="bot-strip" aria-label="Bot mode">
             <div className="section-title"><Bot size={16} /> Bot mode</div>
             <p className="bot-personality">{botPersonality(room.botDifficulty, room.gameId)}</p>
@@ -293,63 +298,71 @@ function Board({
   room,
   canMove,
   currentMark,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
   currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   if (room.gameId === "four-in-a-row") {
-    return <FourInARowBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <FourInARowBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "tic-tac-toe") {
-    return <TicTacToeBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <TicTacToeBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "gomoku") {
-    return <GomokuBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <GomokuBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "ultimate-tic-tac-toe") {
-    return <UltimateTicTacToeBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <UltimateTicTacToeBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "dots-and-boxes") {
-    return <DotsAndBoxesBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <DotsAndBoxesBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "reversi") {
-    return <GridStoneBoard room={room} canMove={canMove} onMove={onMove} label="Reversi board" className="reversi-board" />;
+    return <GridStoneBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} label="Reversi board" className="reversi-board" />;
   }
 
   if (room.gameId === "checkers") {
-    return <CheckersBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+    return <CheckersBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "battleship") {
-    return <BattleshipBoard room={room} canMove={canMove} onMove={onMove} />;
+    return <BattleshipBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "mancala") {
-    return <MancalaBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+    return <MancalaBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
   }
 
   if (room.gameId === "hex") {
-    return <GridStoneBoard room={room} canMove={canMove} onMove={onMove} label="Hex board" className="hex-board" />;
+    return <GridStoneBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} label="Hex board" className="hex-board" />;
   }
 
-  return <MorrisBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+  if (room.gameId === "nine-mens-morris") {
+    return <MorrisBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
+  }
+
+  return <FlappyBirdGame />;
 }
 
 function FourInARowBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   return (
@@ -372,7 +385,7 @@ function FourInARowBoard({
             const cell = row[columnIndex];
             return (
               <span
-                className={`connect-slot ${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""}`}
+                className={`connect-slot ${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
                 key={`${rowIndex}-${columnIndex}`}
               >
                 <span />
@@ -388,10 +401,12 @@ function FourInARowBoard({
 function TicTacToeBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   return (
@@ -404,14 +419,14 @@ function TicTacToeBoard({
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => (
           <button
-            className={isWinning(room, rowIndex, columnIndex) ? "win" : ""}
+            className={`${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
             type="button"
             aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
             disabled={!canMove || Boolean(cell)}
             onClick={() => onMove({ row: rowIndex, column: columnIndex })}
             key={`${rowIndex}-${columnIndex}`}
           >
-            {cell ? (cell === "p1" ? "X" : "O") : ""}
+            {cell ? <span className={`tic-mark ${cell}`} aria-hidden="true" /> : null}
           </button>
         ))
       )}
@@ -422,10 +437,12 @@ function TicTacToeBoard({
 function GomokuBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   return (
@@ -433,7 +450,7 @@ function GomokuBoard({
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => (
           <button
-            className={`${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""}`}
+            className={`${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
             type="button"
             aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
             disabled={!canMove || Boolean(cell)}
@@ -451,10 +468,12 @@ function GomokuBoard({
 function UltimateTicTacToeBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const activeBoard = room.meta?.ultimate?.activeBoard ?? null;
@@ -474,14 +493,14 @@ function UltimateTicTacToeBoard({
           const claimed = Boolean(localWinners[mini]);
           return (
             <button
-              className={`${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${playable ? "active-mini" : ""} ${claimed ? "claimed-mini" : ""}`}
+              className={`${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${playable ? "active-mini" : ""} ${claimed ? "claimed-mini" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
               type="button"
               aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
               disabled={!canMove || Boolean(cell) || !playable || claimed}
               onClick={() => onMove({ row: rowIndex, column: columnIndex })}
               key={`${rowIndex}-${columnIndex}`}
             >
-              {cell ? (cell === "p1" ? "X" : "O") : ""}
+              {cell ? <span className={`tic-mark ${cell}`} aria-hidden="true" /> : null}
             </button>
           );
         })
@@ -493,10 +512,12 @@ function UltimateTicTacToeBoard({
 function DotsAndBoxesBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const dots = room.meta?.dots;
@@ -513,7 +534,7 @@ function DotsAndBoxesBoard({
         const drawn = dots.hEdges[edgeRow]?.[edgeColumn];
         items.push(
           <button
-            className={drawn ? "dot-edge horizontal drawn" : "dot-edge horizontal"}
+            className={`${drawn ? "dot-edge horizontal drawn" : "dot-edge horizontal"} ${isLastEdgeMove(lastMove, "h", edgeRow, edgeColumn) ? "last-move" : ""}`}
             type="button"
             aria-label={`Horizontal line ${edgeRow + 1}, ${edgeColumn + 1}`}
             disabled={!canMove || drawn}
@@ -527,7 +548,7 @@ function DotsAndBoxesBoard({
         const drawn = dots.vEdges[edgeRow]?.[edgeColumn];
         items.push(
           <button
-            className={drawn ? "dot-edge vertical drawn" : "dot-edge vertical"}
+            className={`${drawn ? "dot-edge vertical drawn" : "dot-edge vertical"} ${isLastEdgeMove(lastMove, "v", edgeRow, edgeColumn) ? "last-move" : ""}`}
             type="button"
             aria-label={`Vertical line ${edgeRow + 1}, ${edgeColumn + 1}`}
             disabled={!canMove || drawn}
@@ -536,8 +557,20 @@ function DotsAndBoxesBoard({
           />
         );
       } else {
-        const box = room.board[Math.floor(row / 2)]?.[Math.floor(column / 2)];
-        items.push(<span className={`dot-box ${box ?? ""}`} key={`${row}-${column}`} />);
+        const boxRow = Math.floor(row / 2);
+        const boxColumn = Math.floor(column / 2);
+        const box = room.board[boxRow]?.[boxColumn];
+        const sides = countDotBoxSides(dots, boxRow, boxColumn);
+        const boxState = box
+          ? `claimed by ${box === "p1" ? "Blue" : "Red"}`
+          : `open with ${sides} sides`;
+        items.push(
+          <span
+            className={`dot-box ${box ?? ""} ${!box && sides === 3 ? "almost" : ""} ${isLastMove(lastMove, boxRow, boxColumn) && box ? "last-move" : ""}`}
+            aria-label={`Box ${boxRow + 1}, ${boxColumn + 1} ${boxState}`}
+            key={`${row}-${column}`}
+          />
+        );
       }
     }
   }
@@ -565,20 +598,22 @@ function GridStoneBoard({
   canMove,
   onMove,
   label,
-  className
+  className,
+  lastMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
   onMove: (move: GameMove) => void;
   label: string;
   className: string;
+  lastMove: AppliedMove | null;
 }) {
   return (
     <div className={className} role="group" aria-label={label}>
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => (
           <button
-            className={`${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""}`}
+            className={`${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
             type="button"
             aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
             disabled={!canMove || Boolean(cell)}
@@ -597,11 +632,13 @@ function CheckersBoard({
   room,
   canMove,
   currentMark,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
   currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const [selected, setSelected] = useState<BoardPoint | null>(null);
@@ -615,7 +652,7 @@ function CheckersBoard({
           const isSelected = selected?.row === rowIndex && selected.column === columnIndex;
           return (
             <button
-              className={`${dark ? "dark" : "light"} ${cell ?? ""} ${isSelected ? "selected" : ""} ${kings.has(`${rowIndex},${columnIndex}`) ? "king" : ""}`}
+              className={`${dark ? "dark" : "light"} ${cell ?? ""} ${isSelected ? "selected" : ""} ${kings.has(`${rowIndex},${columnIndex}`) ? "king" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
               type="button"
               aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
               disabled={!canMove || !dark}
@@ -643,10 +680,12 @@ function CheckersBoard({
 function BattleshipBoard({
   room,
   canMove,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const shots = room.meta?.battleship?.humanShots ?? {};
@@ -663,7 +702,7 @@ function BattleshipBoard({
             const shot = shots[`${rowIndex},${columnIndex}`];
             return (
               <button
-                className={shot ?? ""}
+                className={`${shot ?? ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
                 type="button"
                 aria-label={`Fire row ${rowIndex + 1}, column ${columnIndex + 1}`}
                 disabled={!canMove || Boolean(shot)}
@@ -684,11 +723,13 @@ function MancalaBoard({
   room,
   canMove,
   currentMark,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
   currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const mancala = room.meta?.mancala;
@@ -701,6 +742,7 @@ function MancalaBoard({
           const column = 5 - index;
           return (
             <button
+              className={isLastMove(lastMove, 0, column) ? "last-move" : ""}
               type="button"
               disabled={!canMove || currentMark !== "p2" || stones === 0}
               onClick={() => onMove({ column })}
@@ -714,6 +756,7 @@ function MancalaBoard({
       <div className="mancala-pits bottom">
         {mancala.pits.p1.map((stones, column) => (
           <button
+            className={isLastMove(lastMove, 1, column) ? "last-move" : ""}
             type="button"
             disabled={!canMove || currentMark !== "p1" || stones === 0}
             onClick={() => onMove({ column })}
@@ -732,11 +775,13 @@ function MorrisBoard({
   room,
   canMove,
   currentMark,
+  lastMove,
   onMove
 }: {
   room: RoomSnapshot;
   canMove: boolean;
   currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
   onMove: (move: GameMove) => void;
 }) {
   const [selected, setSelected] = useState<BoardPoint | null>(null);
@@ -755,7 +800,7 @@ function MorrisBoard({
           const isSelected = selected?.row === rowIndex && selected.column === columnIndex;
           return (
             <button
-              className={`${playable ? "point" : "blank"} ${cell ?? ""} ${isSelected ? "selected" : ""}`}
+              className={`${playable ? "point" : "blank"} ${cell ?? ""} ${isSelected ? "selected" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
               type="button"
               aria-label={`Point ${rowIndex + 1}, ${columnIndex + 1}`}
               disabled={!canMove || !playable}
@@ -780,6 +825,201 @@ function MorrisBoard({
       )}
     </div>
   );
+}
+
+interface FlappyPipe {
+  id: number;
+  x: number;
+  gapTop: number;
+  scored: boolean;
+}
+
+interface FlappyRun {
+  phase: "ready" | "playing" | "crashed";
+  birdY: number;
+  velocity: number;
+  pipes: FlappyPipe[];
+  score: number;
+  best: number;
+}
+
+const FLAPPY_WIDTH = 420;
+const FLAPPY_HEIGHT = 620;
+const FLAPPY_GROUND = 78;
+const FLAPPY_BIRD_X = 116;
+const FLAPPY_BIRD_SIZE = 34;
+const FLAPPY_PIPE_WIDTH = 66;
+const FLAPPY_GAP = 158;
+const FLAPPY_BEST_KEY = "table-sparks-flappy-best";
+
+function FlappyBirdGame() {
+  const [run, setRun] = useState<FlappyRun>(() => ({
+    phase: "ready",
+    birdY: 250,
+    velocity: 0,
+    pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
+    score: 0,
+    best: Number(localStorage.getItem(FLAPPY_BEST_KEY) ?? 0)
+  }));
+  const frameRef = useRef<number | null>(null);
+  const lastFrameRef = useRef<number | null>(null);
+  const nextPipeIdRef = useRef(2);
+
+  useEffect(() => {
+    if (run.phase !== "playing") return;
+
+    const tick = (time: number) => {
+      const previous = lastFrameRef.current ?? time;
+      const delta = Math.min((time - previous) / 1000, 0.034);
+      lastFrameRef.current = time;
+      setRun((current) => advanceFlappyRun(current, delta, nextPipeIdRef));
+      frameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    frameRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      lastFrameRef.current = null;
+    };
+  }, [run.phase]);
+
+  useEffect(() => {
+    if (run.phase === "crashed" && run.score > run.best) {
+      localStorage.setItem(FLAPPY_BEST_KEY, String(run.score));
+      setRun((current) => ({ ...current, best: run.score }));
+    }
+  }, [run.best, run.phase, run.score]);
+
+  const flap = () => {
+    setRun((current) => {
+      if (current.phase !== "playing") {
+        nextPipeIdRef.current = 2;
+        return {
+          phase: "playing",
+          birdY: 250,
+          velocity: -345,
+          pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
+          score: 0,
+          best: current.best
+        };
+      }
+      return { ...current, velocity: -345 };
+    });
+  };
+
+  return (
+    <div
+      className={`flappy-game ${run.phase}`}
+      role="application"
+      aria-label="Flappy Bird"
+      tabIndex={0}
+      onPointerDown={flap}
+      onKeyDown={(event) => {
+        if (event.key === " " || event.key === "ArrowUp" || event.key === "Enter") {
+          event.preventDefault();
+          flap();
+        }
+      }}
+    >
+      <div className="flappy-score" aria-label="Score">
+        <span>{run.score}</span>
+        <small>Best {run.best}</small>
+      </div>
+      <div
+        className="flappy-bird-sprite"
+        style={{ "--bird-y": `${(run.birdY / FLAPPY_HEIGHT) * 100}%`, "--bird-tilt": `${Math.max(-18, Math.min(42, run.velocity / 11))}deg` } as CSSProperties}
+      >
+        <span />
+      </div>
+      {run.pipes.map((pipe) => (
+        <div
+          className="flappy-pipe"
+          style={{
+            "--pipe-x": `${(pipe.x / FLAPPY_WIDTH) * 100}%`,
+            "--gap-top": `${(pipe.gapTop / FLAPPY_HEIGHT) * 100}%`,
+            "--gap-size": `${(FLAPPY_GAP / FLAPPY_HEIGHT) * 100}%`
+          } as CSSProperties}
+          key={pipe.id}
+        >
+          <span className="pipe-top" />
+          <span className="pipe-bottom" />
+        </div>
+      ))}
+      <div className="flappy-cloud one" />
+      <div className="flappy-cloud two" />
+      <div className="flappy-ground" />
+      {run.phase !== "playing" ? (
+        <button className="flappy-start" type="button" aria-label="Start run" onClick={(event) => {
+          event.stopPropagation();
+          flap();
+        }}>
+          {run.phase === "crashed" ? "Again" : "Start"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function advanceFlappyRun(
+  run: FlappyRun,
+  delta: number,
+  nextPipeIdRef: { current: number }
+): FlappyRun {
+  if (run.phase !== "playing") return run;
+
+  const velocity = run.velocity + 940 * delta;
+  const birdY = run.birdY + velocity * delta;
+  let score = run.score;
+  let pipes = run.pipes
+    .map((pipe) => {
+      const x = pipe.x - 150 * delta;
+      const scored = pipe.scored || x + FLAPPY_PIPE_WIDTH < FLAPPY_BIRD_X;
+      if (!pipe.scored && scored) score += 1;
+      return { ...pipe, x, scored };
+    })
+    .filter((pipe) => pipe.x > -FLAPPY_PIPE_WIDTH - 8);
+
+  const lastPipe = pipes.at(-1);
+  if (!lastPipe || lastPipe.x < FLAPPY_WIDTH - 184) {
+    pipes = [...pipes, makePipe(FLAPPY_WIDTH + 34, nextPipeIdRef.current)];
+    nextPipeIdRef.current += 1;
+  }
+
+  const crashed =
+    birdY < 0 ||
+    birdY + FLAPPY_BIRD_SIZE > FLAPPY_HEIGHT - FLAPPY_GROUND ||
+    pipes.some((pipe) => hitsPipe(pipe, birdY));
+
+  return {
+    ...run,
+    birdY,
+    velocity,
+    pipes,
+    score,
+    phase: crashed ? "crashed" : "playing"
+  };
+}
+
+function hitsPipe(pipe: FlappyPipe, birdY: number): boolean {
+  const birdLeft = FLAPPY_BIRD_X;
+  const birdRight = FLAPPY_BIRD_X + FLAPPY_BIRD_SIZE;
+  const birdTop = birdY;
+  const birdBottom = birdY + FLAPPY_BIRD_SIZE;
+  const pipeLeft = pipe.x;
+  const pipeRight = pipe.x + FLAPPY_PIPE_WIDTH;
+  const overlapsX = birdRight > pipeLeft && birdLeft < pipeRight;
+  const insideGap = birdTop > pipe.gapTop && birdBottom < pipe.gapTop + FLAPPY_GAP;
+  return overlapsX && !insideGap;
+}
+
+function makePipe(x: number, id: number): FlappyPipe {
+  return {
+    id,
+    x,
+    gapTop: 106 + Math.floor(Math.random() * 258),
+    scored: false
+  };
 }
 
 function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"] }) {
@@ -818,6 +1058,22 @@ function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"
   );
 }
 
+function isLastMove(lastMove: AppliedMove | null, row: number, column: number): boolean {
+  return Boolean(lastMove && lastMove.row === row && lastMove.column === column);
+}
+
+function isLastEdgeMove(lastMove: AppliedMove | null, edge: "h" | "v", row: number, column: number): boolean {
+  return Boolean(lastMove && lastMove.edge === edge && lastMove.row === row && lastMove.column === column);
+}
+
+function countDotBoxSides(dots: NonNullable<RoomSnapshot["meta"]>["dots"], row: number, column: number): number {
+  if (!dots) return 0;
+  return Number(dots.hEdges[row]?.[column]) +
+    Number(dots.hEdges[row + 1]?.[column]) +
+    Number(dots.vEdges[row]?.[column]) +
+    Number(dots.vEdges[row]?.[column + 1]);
+}
+
 function isWinning(room: RoomSnapshot, row: number, column: number): boolean {
   return room.winningLine.some((point: BoardPoint) => point.row === row && point.column === column);
 }
@@ -839,6 +1095,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
+  if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
   return "Place nine pieces, form mills of three, then slide pieces and remove opponent pieces.";
 }
 

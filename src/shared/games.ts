@@ -9,7 +9,8 @@ export type GameId =
   | "battleship"
   | "mancala"
   | "hex"
-  | "nine-mens-morris";
+  | "nine-mens-morris"
+  | "flappy-bird";
 export type PlayerMark = "p1" | "p2";
 export type Winner = PlayerMark | "draw" | null;
 export type Cell = PlayerMark | null;
@@ -218,6 +219,16 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     moveMode: "custom",
     playerNames: { p1: "White", p2: "Black" },
     supportsFriend: true
+  },
+  "flappy-bird": {
+    id: "flappy-bird",
+    name: "Flappy Bird",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Bird", p2: "Pipes" },
+    supportsFriend: false
   }
 };
 
@@ -243,7 +254,8 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
   battleship: [{ id: "classic", label: "Classic", detail: "10x10" }],
   mancala: [{ id: "classic", label: "Classic", detail: "6 pits" }],
   hex: [{ id: "classic", label: "Classic", detail: "11x11" }],
-  "nine-mens-morris": [{ id: "classic", label: "Classic", detail: "24 points" }]
+  "nine-mens-morris": [{ id: "classic", label: "Classic", detail: "24 points" }],
+  "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }]
 };
 
 const DIRECTIONS = [
@@ -309,6 +321,10 @@ export function isBotDifficulty(value: string): value is BotDifficulty {
 
 export function supportsFriendMode(gameId: GameId): boolean {
   return getGameDefinition(gameId).supportsFriend;
+}
+
+export function isSoloGame(gameId: GameId): boolean {
+  return gameId === "flappy-bird";
 }
 
 export function getBoardVariantOptions(gameId: GameId): BoardVariantOption[] {
@@ -387,6 +403,8 @@ export function applyGameMove(
       return applyHexMove(state, player, move);
     case "nine-mens-morris":
       return applyMorrisMove(state, player, move);
+    case "flappy-bird":
+      return { ok: false, state, reason: "Flappy Bird is a solo arcade run." };
     default:
       return applyConnectMove(state, player, move);
   }
@@ -412,6 +430,8 @@ export function getLegalMoves(state: GameState): GameMove[] {
       return getEmptyCellMoves(state);
     case "nine-mens-morris":
       return getMorrisMoves(state, state.turn);
+    case "flappy-bird":
+      return [];
     default:
       return getConnectMoves(state);
   }
@@ -431,6 +451,10 @@ export function chooseBotMove(
   const opponent = otherPlayer(player);
   const blockingMove = findImmediateWinningMove({ ...state, turn: opponent }, opponent, legalMoves);
   if (blockingMove && state.gameId !== "battleship") return blockingMove;
+
+  if (state.gameId === "dots-and-boxes") {
+    return chooseDotsMove({ ...state, turn: player }, legalMoves, difficulty);
+  }
 
   if (state.gameId === "tic-tac-toe" && difficulty === "ruthless") {
     return state.board.length === 3
@@ -912,6 +936,79 @@ function getDotsMoves(state: GameState): GameMove[] {
   return moves;
 }
 
+function chooseDotsMove(
+  state: GameState,
+  legalMoves: GameMove[],
+  difficulty: BotDifficulty
+): GameMove {
+  const meta = state.meta?.dots;
+  if (!meta) return orderedMoves(state, legalMoves)[0];
+  const ordered = orderedMoves(state, legalMoves);
+  const scoring = ordered
+    .map((move) => ({ move, completed: boxesCompletedByDotsMove(meta, move).length }))
+    .filter((candidate) => candidate.completed > 0)
+    .sort((a, b) => b.completed - a.completed);
+  if (scoring[0]) return scoring[0].move;
+
+  const safeMoves = ordered.filter((move) => !wouldLeaveThreeSidedBox(meta, move));
+  if (safeMoves.length > 0) {
+    if (difficulty === "casual") return safeMoves[0];
+    return chooseBySearch(state, state.turn, safeMoves, difficulty === "sharp" ? 2 : 3);
+  }
+
+  return ordered
+    .map((move) => ({ move, danger: dotsDangerScore(meta, move) }))
+    .sort((a, b) => a.danger - b.danger)[0].move;
+}
+
+function boxesCompletedByDotsMove(meta: DotsMeta, move: GameMove): BoardPoint[] {
+  if (move.edge !== "h" && move.edge !== "v") return [];
+  if (!Number.isInteger(move.row) || move.row === undefined || !Number.isInteger(move.column)) return [];
+  const next = cloneDotsMeta(meta);
+  if (next[move.edge === "h" ? "hEdges" : "vEdges"][move.row]?.[move.column] === undefined) return [];
+  next[move.edge === "h" ? "hEdges" : "vEdges"][move.row][move.column] = true;
+  return completedBoxes(next, move.edge, move.row, move.column);
+}
+
+function wouldLeaveThreeSidedBox(meta: DotsMeta, move: GameMove): boolean {
+  if (boxesCompletedByDotsMove(meta, move).length > 0) return false;
+  if (move.edge !== "h" && move.edge !== "v") return false;
+  if (!Number.isInteger(move.row) || move.row === undefined || !Number.isInteger(move.column)) return false;
+  const next = cloneDotsMeta(meta);
+  next[move.edge === "h" ? "hEdges" : "vEdges"][move.row][move.column] = true;
+  return adjacentDotsBoxes(meta, move.edge, move.row, move.column).some((box) =>
+    dotsBoxSideCount(next, box.row, box.column) === 3
+  );
+}
+
+function dotsDangerScore(meta: DotsMeta, move: GameMove): number {
+  if (move.edge !== "h" && move.edge !== "v") return Number.POSITIVE_INFINITY;
+  if (!Number.isInteger(move.row) || move.row === undefined || !Number.isInteger(move.column)) return Number.POSITIVE_INFINITY;
+  const next = cloneDotsMeta(meta);
+  next[move.edge === "h" ? "hEdges" : "vEdges"][move.row][move.column] = true;
+  return adjacentDotsBoxes(meta, move.edge, move.row, move.column)
+    .reduce((score, box) => score + dotsBoxSideCount(next, box.row, box.column), 0);
+}
+
+function adjacentDotsBoxes(meta: DotsMeta, edge: "h" | "v", row: number, column: number): BoardPoint[] {
+  const boxes = edge === "h"
+    ? [{ row: row - 1, column }, { row, column }]
+    : [{ row, column: column - 1 }, { row, column }];
+  return boxes.filter((box) =>
+    box.row >= 0 &&
+    box.row < meta.size &&
+    box.column >= 0 &&
+    box.column < meta.size
+  );
+}
+
+function dotsBoxSideCount(meta: DotsMeta, row: number, column: number): number {
+  return Number(meta.hEdges[row][column]) +
+    Number(meta.hEdges[row + 1][column]) +
+    Number(meta.vEdges[row][column]) +
+    Number(meta.vEdges[row][column + 1]);
+}
+
 function getReversiMoves(state: GameState, player: PlayerMark): GameMove[] {
   return getEmptyCellMoves(state).filter((move) =>
     reversiFlips(state.board, { row: move.row!, column: move.column }, player).length > 0
@@ -1388,6 +1485,10 @@ function cloneBoard(board: Cell[][]): Cell[][] {
 
 function cloneMeta(state: GameState): GameMeta {
   return state.meta ? JSON.parse(JSON.stringify(state.meta)) as GameMeta : {};
+}
+
+function cloneDotsMeta(meta: DotsMeta): DotsMeta {
+  return JSON.parse(JSON.stringify(meta)) as DotsMeta;
 }
 
 function keyOf(point: BoardPoint): string {

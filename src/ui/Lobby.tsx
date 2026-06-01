@@ -1,6 +1,6 @@
 import { Bot, ChevronRight, Link2, MessageCircle, Sparkles, UsersRound } from "lucide-react";
 import type { BotDifficulty, GameId } from "../shared/games";
-import { GAME_IDS, getGameDefinition, supportsFriendMode } from "../shared/games";
+import { GAME_IDS, getGameDefinition, isSoloGame, supportsFriendMode } from "../shared/games";
 
 interface LobbyProps {
   onCreateRoom: (
@@ -63,10 +63,10 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
                         botDifficulty: "ruthless"
                       })}
                       disabled={creatingGameId === gameId}
-                      aria-label={`Play ${definition.name} against bot`}
+                      aria-label={isSoloGame(gameId) ? `Play ${definition.name} solo` : `Play ${definition.name} against bot`}
                     >
                       <Bot size={18} />
-                      Bot
+                      {isSoloGame(gameId) ? "Solo" : "Bot"}
                     </button>
                     {supportsFriendMode(gameId) ? (
                       <button
@@ -105,6 +105,7 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "battleship") return "Bot-only fleet hunting with splashy misses and nasty hits.";
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
+  if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
   return "Place, slide, make mills, and knock pieces off the board.";
 }
 
@@ -191,6 +192,17 @@ function GamePreview({ gameId }: { gameId: GameId }) {
     return (
       <div className="mini-hex" aria-hidden="true">
         {Array.from({ length: 49 }).map((_, index) => <span className={index % 8 === 0 ? "p1" : index % 6 === 0 ? "p2" : ""} key={index} />)}
+      </div>
+    );
+  }
+
+  if (gameId === "flappy-bird") {
+    return (
+      <div className="mini-flappy" aria-hidden="true">
+        <span className="mini-bird" />
+        <span className="mini-pipe top" />
+        <span className="mini-pipe bottom" />
+        <span className="mini-ground" />
       </div>
     );
   }

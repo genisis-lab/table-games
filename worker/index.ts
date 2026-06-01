@@ -1,4 +1,4 @@
-import { isBotDifficulty, isGameId, type BotDifficulty, type GameId } from "../src/shared/games";
+import { isBotDifficulty, isGameId, supportsFriendMode, type BotDifficulty, type GameId } from "../src/shared/games";
 import { GameRoom, type Env } from "./game-room";
 
 export { GameRoom };
@@ -26,7 +26,9 @@ export default {
           return json({ error: "Unknown game." }, 400);
         }
 
-        const opponent = body.opponent === "bot" ? "bot" : "friend";
+        const opponent = supportsFriendMode(body.gameId)
+          ? body.opponent === "bot" ? "bot" : "friend"
+          : "bot";
         const botDifficulty = body.botDifficulty && isBotDifficulty(body.botDifficulty)
           ? body.botDifficulty
           : "ruthless";

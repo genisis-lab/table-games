@@ -50,6 +50,14 @@ export interface MoveRecord {
   at: number;
 }
 
+export interface AppliedMove extends BoardPoint {
+  player: PlayerMark;
+  edge?: "h" | "v";
+  toRow?: number;
+  toColumn?: number;
+  at: number;
+}
+
 export interface RoomSnapshot {
   roomId: string;
   gameId: GameId;
@@ -87,7 +95,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "room_snapshot"; room: RoomSnapshot }
-  | { type: "move_applied"; room: RoomSnapshot; move: BoardPoint & { player: PlayerMark } }
+  | { type: "move_applied"; room: RoomSnapshot; move: AppliedMove }
   | { type: "chat_added"; room: RoomSnapshot; chat: ChatMessage }
   | { type: "reaction_added"; room: RoomSnapshot; reaction: ReactionEvent }
   | { type: "presence_changed"; room: RoomSnapshot }

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Cell } from "../shared/games";
+import type { AppliedMove } from "../shared/protocol";
 import type { RoomSnapshot } from "../shared/protocol";
 import { GameRoomView } from "./GameRoomView";
 
@@ -186,6 +187,122 @@ describe("GameRoomView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "5x5 board" }));
     expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
+  });
+
+  it("marks the most recent Tic Tac Toe move so it can animate without resizing the grid", () => {
+    const lastMove: AppliedMove = {
+      row: 1,
+      column: 1,
+      player: "p1",
+      at: 9
+    };
+
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "tic-tac-toe",
+          board: [
+            [null, null, null],
+            [null, "p1", null],
+            [null, null, null]
+          ]
+        }}
+        guestToken="yellow-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        lastMove={lastMove}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /row 2, column 2/i })).toHaveClass("last-move");
+  });
+
+  it("renders a solo Flappy Bird table without friend-only controls", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("application", { name: "Flappy Bird" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
+    expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
+  });
+
+  it("highlights nearly completed Dots and Boxes squares as the real scoring target", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "dots-and-boxes",
+          board: Array.from({ length: 4 }, () => Array.from<Cell>({ length: 4 }).fill(null)),
+          meta: {
+            dots: {
+              size: 4,
+              hEdges: [
+                [true, false, false, false],
+                [true, false, false, false],
+                [false, false, false, false],
+                [false, false, false, false],
+                [false, false, false, false]
+              ],
+              vEdges: [
+                [true, false, false, false, false],
+                [false, false, false, false, false],
+                [false, false, false, false, false],
+                [false, false, false, false, false]
+              ],
+              scores: { p1: 0, p2: 0 }
+            }
+          }
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Box 1, 1 open with 3 sides")).toHaveClass("almost");
   });
 
   it("shows rules, move history, and undo requests", () => {

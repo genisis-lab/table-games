@@ -8,7 +8,7 @@ type ServerMessage = {
     gameId: string;
     boardVariant?: string;
     board: Array<Array<string | null>>;
-    players: Array<{ name: string; mark: string; guestToken?: string }>;
+    players: Array<{ name: string; mark: string; guestToken?: string; isBot?: boolean }>;
     spectators: Array<{ name: string; guestToken?: string }>;
     chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
@@ -105,9 +105,33 @@ describe("GameRoom Durable Object", () => {
     const humanMove = await waitForType(player, "move_applied");
     expect(humanMove.move?.player).toBe("p1");
 
+    const botWaitStarted = performance.now();
     const botMove = await waitForType(player, "move_applied");
+    expect(performance.now() - botWaitStarted).toBeGreaterThanOrEqual(300);
     expect(botMove.move?.player).toBe("p2");
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
+  });
+
+  it("creates Flappy Bird as a solo room without seating a bot opponent", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "flappy-bird",
+        opponent: "bot"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+
+    expect(snapshot.room?.gameId).toBe("flappy-bird");
+    expect(snapshot.room?.players).toMatchObject([
+      { name: "Ruby", mark: "p1" }
+    ]);
+    expect(snapshot.room?.players.some((roomPlayer) => roomPlayer.isBot)).toBe(false);
   });
 
   it("resets rooms when a seated player changes board variants", async () => {
@@ -244,7 +268,7 @@ function waitForRoomWhere(
   predicate: (room: NonNullable<ServerMessage["room"]>) => boolean
 ): Promise<ServerMessage> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Timed out waiting for matching room")), 1000);
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for matching room")), 2500);
 
     const onMessage = (event: MessageEvent) => {
       const message = JSON.parse(String(event.data)) as ServerMessage;
@@ -261,7 +285,7 @@ function waitForRoomWhere(
 
 function waitForType(socket: WebSocket, type: string): Promise<ServerMessage> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${type}`)), 1000);
+    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${type}`)), 2500);
 
     const onMessage = (event: MessageEvent) => {
       const message = JSON.parse(String(event.data)) as ServerMessage;
