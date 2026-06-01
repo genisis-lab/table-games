@@ -6,6 +6,7 @@ import {
   getGameDefinition,
   isBotDifficulty,
   isGameId,
+  supportsFriendMode,
   type BotDifficulty,
   type GameId,
   type GameMove,
@@ -70,10 +71,13 @@ export class GameRoom extends DurableObject<Env> {
         return Response.json({ error: "Unknown game." }, { status: 400 });
       }
 
+      const opponent = supportsFriendMode(body.gameId)
+        ? body.opponent === "bot" ? "bot" : "friend"
+        : "bot";
       const room = await this.loadRoom(
         roomId,
         body.gameId,
-        body.opponent === "bot" ? "bot" : "friend",
+        opponent,
         body.botDifficulty && isBotDifficulty(body.botDifficulty) ? body.botDifficulty : "ruthless"
       );
       await this.saveRoom(room);
@@ -359,6 +363,28 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
+    if (!supportsFriendMode(gameId) && room.opponent !== "bot") {
+      room.opponent = "bot";
+      const now = Date.now();
+      const existingBot = room.players.find((roomPlayer) => roomPlayer.isBot);
+      if (existingBot) {
+        existingBot.mark = "p2";
+        existingBot.connected = true;
+      } else {
+        const displaced = room.players.find((roomPlayer) => roomPlayer.mark === "p2" && !roomPlayer.isBot);
+        if (displaced) {
+          room.spectators.push({
+            guestToken: displaced.guestToken,
+            name: displaced.name,
+            connected: displaced.connected,
+            joinedAt: displaced.joinedAt
+          });
+          room.players = room.players.filter((roomPlayer) => roomPlayer !== displaced);
+        }
+        room.players.push(createBotPlayer(room.roomId, now));
+      }
+    }
+
     room.gameId = gameId;
     room.game = createGameState(gameId);
     room.updatedAt = Date.now();
@@ -485,6 +511,7 @@ export class GameRoom extends DurableObject<Env> {
       winner: room.game.winner,
       winningLine: room.game.winningLine,
       moveCount: room.game.moveCount,
+      meta: room.game.meta,
       chat: room.chat,
       reactionEvents: room.reactionEvents,
       createdAt: room.createdAt,

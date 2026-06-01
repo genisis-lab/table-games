@@ -8,11 +8,20 @@ V1 includes:
 - Four in a Row
 - Tic Tac Toe
 - Gomoku
+- Ultimate Tic Tac Toe
+- Dots and Boxes
+- Reversi
+- Checkers
+- Battleship bot mode
+- Mancala
+- Hex
+- Nine Men's Morris
 - Invite links for friend rooms
 - Bot rooms with Casual, Sharp, and Ruthless modes
 - Live chat
 - Full-screen reaction bursts
 - Rematch and game switching
+- Resizable boards for Tic Tac Toe-style games and Dots and Boxes
 
 ## Development
 

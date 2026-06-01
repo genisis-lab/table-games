@@ -1,6 +1,6 @@
 import { Bot, ChevronRight, Link2, MessageCircle, Sparkles, UsersRound } from "lucide-react";
 import type { BotDifficulty, GameId } from "../shared/games";
-import { GAME_IDS, getGameDefinition } from "../shared/games";
+import { GAME_IDS, getGameDefinition, supportsFriendMode } from "../shared/games";
 
 interface LobbyProps {
   onCreateRoom: (
@@ -68,19 +68,21 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
                       <Bot size={18} />
                       Bot
                     </button>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => onCreateRoom(gameId, {
-                        opponent: "friend",
-                        botDifficulty: "ruthless"
-                      })}
-                      disabled={creatingGameId === gameId}
-                      aria-label={`Invite friend to ${definition.name}`}
-                    >
-                      Friend
-                      <ChevronRight size={18} />
-                    </button>
+                    {supportsFriendMode(gameId) ? (
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => onCreateRoom(gameId, {
+                          opponent: "friend",
+                          botDifficulty: "ruthless"
+                        })}
+                        disabled={creatingGameId === gameId}
+                        aria-label={`Invite friend to ${definition.name}`}
+                      >
+                        Friend
+                        <ChevronRight size={18} />
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -95,7 +97,15 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
 function descriptionFor(gameId: GameId): string {
   if (gameId === "four-in-a-row") return "Gravity drops, red versus yellow, loud little wins.";
   if (gameId === "tic-tac-toe") return "Marker-grid duels for fast revenge rounds.";
-  return "Classic black and white stones on a wooden 15x15 grid.";
+  if (gameId === "gomoku") return "Classic black and white stones on a wooden 15x15 grid.";
+  if (gameId === "ultimate-tic-tac-toe") return "Nine tiny grids that keep sending the next move somewhere spicy.";
+  if (gameId === "dots-and-boxes") return "Draw the last line, claim the box, keep the turn.";
+  if (gameId === "reversi") return "Flip whole rows of discs and watch the table change sides.";
+  if (gameId === "checkers") return "Diagonal jumps, kings, and clean classic board energy.";
+  if (gameId === "battleship") return "Bot-only fleet hunting with splashy misses and nasty hits.";
+  if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
+  if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
+  return "Place, slide, make mills, and knock pieces off the board.";
 }
 
 function GamePreview({ gameId }: { gameId: GameId }) {
@@ -122,11 +132,74 @@ function GamePreview({ gameId }: { gameId: GameId }) {
     );
   }
 
+  if (gameId === "gomoku") {
+    return (
+      <div className="mini-gomoku" aria-hidden="true">
+        {Array.from({ length: 49 }).map((_, index) => (
+          <span
+            className={index === 17 || index === 25 || index === 33 ? "black" : index === 18 || index === 26 ? "white" : ""}
+            key={index}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (gameId === "ultimate-tic-tac-toe") {
+    return (
+      <div className="mini-ultimate" aria-hidden="true">
+        {Array.from({ length: 81 }).map((_, index) => (
+          <span className={index % 10 === 0 ? "x" : index % 8 === 0 ? "o" : ""} key={index} />
+        ))}
+      </div>
+    );
+  }
+
+  if (gameId === "dots-and-boxes") {
+    return (
+      <div className="mini-dots" aria-hidden="true">
+        {Array.from({ length: 25 }).map((_, index) => <span className={index % 2 === 0 ? "line" : ""} key={index} />)}
+      </div>
+    );
+  }
+
+  if (gameId === "mancala") {
+    return (
+      <div className="mini-mancala" aria-hidden="true">
+        {Array.from({ length: 14 }).map((_, index) => <span key={index}>4</span>)}
+      </div>
+    );
+  }
+
+  if (gameId === "battleship") {
+    return (
+      <div className="mini-battleship" aria-hidden="true">
+        {Array.from({ length: 49 }).map((_, index) => <span className={index === 9 || index === 16 || index === 23 ? "hit" : index === 30 ? "miss" : ""} key={index} />)}
+      </div>
+    );
+  }
+
+  if (gameId === "checkers") {
+    return (
+      <div className="mini-checkers" aria-hidden="true">
+        {Array.from({ length: 64 }).map((_, index) => <span className={index % 2 ? (index < 24 ? "black" : index > 39 ? "red" : "") : ""} key={index} />)}
+      </div>
+    );
+  }
+
+  if (gameId === "hex") {
+    return (
+      <div className="mini-hex" aria-hidden="true">
+        {Array.from({ length: 49 }).map((_, index) => <span className={index % 8 === 0 ? "p1" : index % 6 === 0 ? "p2" : ""} key={index} />)}
+      </div>
+    );
+  }
+
   return (
     <div className="mini-gomoku" aria-hidden="true">
       {Array.from({ length: 49 }).map((_, index) => (
         <span
-          className={index === 17 || index === 25 || index === 33 ? "black" : index === 18 || index === 26 ? "white" : ""}
+          className={index === 0 || index === 3 || index === 6 ? "white" : index === 8 || index === 10 ? "black" : ""}
           key={index}
         />
       ))}

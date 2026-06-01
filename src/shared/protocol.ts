@@ -4,6 +4,7 @@ import type {
   Cell,
   GameId,
   GameMove,
+  GameMeta,
   PlayerMark,
   Winner
 } from "./games";
@@ -52,6 +53,7 @@ export interface RoomSnapshot {
   winner: Winner;
   winningLine: BoardPoint[];
   moveCount: number;
+  meta?: GameMeta;
   chat: ChatMessage[];
   reactionEvents: ReactionEvent[];
   createdAt: number;

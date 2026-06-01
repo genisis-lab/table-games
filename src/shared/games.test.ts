@@ -4,6 +4,7 @@ import {
   chooseBotMove,
   createGameState,
   getGameDefinition,
+  type Cell,
   type GameMove,
   type GameState
 } from "./games";
@@ -130,6 +131,108 @@ describe("Gomoku", () => {
       ok: false,
       reason: "That spot is already taken."
     });
+  });
+});
+
+describe("New game engines", () => {
+  it("tracks active boards and local wins in Ultimate Tic Tac Toe", () => {
+    let state = createGameState("ultimate-tic-tac-toe");
+    state = play(state, "p1", { row: 8, column: 8 });
+
+    expect(state.meta?.ultimate?.activeBoard).toBe(8);
+
+    state = play(state, "p2", { row: 6, column: 6 });
+    state = play(state, "p1", { row: 2, column: 2 });
+    state = play(state, "p2", { row: 6, column: 7 });
+    state = play(state, "p1", { row: 2, column: 5 });
+    state = play(state, "p2", { row: 6, column: 8 });
+
+    expect(state.meta?.ultimate?.localWinners[8]).toBe("p2");
+  });
+
+  it("scores completed boxes in Dots and Boxes without changing turns", () => {
+    let state = createGameState("dots-and-boxes");
+    state = play(state, "p1", { edge: "h", row: 0, column: 0 });
+    state = play(state, "p2", { edge: "v", row: 0, column: 0 });
+    state = play(state, "p1", { edge: "h", row: 1, column: 0 });
+    state = play(state, "p2", { edge: "v", row: 0, column: 1 });
+
+    expect(state.board[0][0]).toBe("p2");
+    expect(state.turn).toBe("p2");
+    expect(state.meta?.dots?.scores.p2).toBe(1);
+  });
+
+  it("flips captured discs in Reversi", () => {
+    const state = play(createGameState("reversi"), "p1", { row: 2, column: 3 });
+
+    expect(state.board[2][3]).toBe("p1");
+    expect(state.board[3][3]).toBe("p1");
+  });
+
+  it("moves and promotes Checkers pieces", () => {
+    let state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[1][2] = "p1";
+
+    state = play(state, "p1", { row: 1, column: 2, toRow: 0, toColumn: 3 });
+
+    expect(state.board[0][3]).toBe("p1");
+    expect(state.meta?.checkers?.kings).toContain("0,3");
+  });
+
+  it("records hits in Battleship", () => {
+    const state = createGameState("battleship");
+    const firstShip = state.meta?.battleship?.botShips[0];
+    expect(firstShip).toBeTruthy();
+
+    const next = play(state, "p1", { row: firstShip!.row, column: firstShip!.column });
+    expect(next.meta?.battleship?.humanShots[`${firstShip!.row},${firstShip!.column}`]).toBe("hit");
+  });
+
+  it("sows stones and updates stores in Mancala", () => {
+    const state = play(createGameState("mancala"), "p1", { column: 2 });
+
+    expect(state.meta?.mancala?.pits.p1[2]).toBe(0);
+    expect(state.meta?.mancala?.stores.p1).toBe(1);
+  });
+
+  it("detects a connected Hex path", () => {
+    let state = createGameState("hex");
+    state = play(state, "p1", { row: 0, column: 0 });
+    state = play(state, "p2", { row: 10, column: 0 });
+    state = play(state, "p1", { row: 0, column: 1 });
+    state = play(state, "p2", { row: 10, column: 1 });
+    state = play(state, "p1", { row: 0, column: 2 });
+    state = play(state, "p2", { row: 10, column: 2 });
+    state = play(state, "p1", { row: 0, column: 3 });
+    state = play(state, "p2", { row: 10, column: 3 });
+    state = play(state, "p1", { row: 0, column: 4 });
+    state = play(state, "p2", { row: 10, column: 4 });
+    state = play(state, "p1", { row: 0, column: 5 });
+    state = play(state, "p2", { row: 10, column: 5 });
+    state = play(state, "p1", { row: 0, column: 6 });
+    state = play(state, "p2", { row: 10, column: 6 });
+    state = play(state, "p1", { row: 0, column: 7 });
+    state = play(state, "p2", { row: 10, column: 7 });
+    state = play(state, "p1", { row: 0, column: 8 });
+    state = play(state, "p2", { row: 10, column: 8 });
+    state = play(state, "p1", { row: 0, column: 9 });
+    state = play(state, "p2", { row: 10, column: 9 });
+    state = play(state, "p1", { row: 0, column: 10 });
+
+    expect(state.winner).toBe("p1");
+  });
+
+  it("places Nine Men's Morris pieces and removes an opponent after a mill", () => {
+    let state = createGameState("nine-mens-morris");
+    state = play(state, "p1", { row: 0, column: 0 });
+    state = play(state, "p2", { row: 1, column: 1 });
+    state = play(state, "p1", { row: 0, column: 3 });
+    state = play(state, "p2", { row: 1, column: 3 });
+    state = play(state, "p1", { row: 0, column: 6 });
+
+    expect(state.meta?.morris?.placed.p1).toBe(3);
+    expect(state.board.flat().filter((cell) => cell === "p2")).toHaveLength(1);
   });
 });
 

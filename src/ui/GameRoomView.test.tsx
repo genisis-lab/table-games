@@ -145,4 +145,29 @@ describe("GameRoomView", () => {
     fireEvent.click(screen.getByRole("button", { name: /sharp bot/i }));
     expect(onSetBotDifficulty).toHaveBeenCalledWith("sharp");
   });
+
+  it("offers larger boards for Tic Tac Toe-style games", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "tic-tac-toe",
+          board: Array.from({ length: 3 }, () => Array.from<Cell>({ length: 3 }).fill(null))
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Huge board" }));
+    expect(screen.getByLabelText("Tic Tac Toe board").closest(".board-stage")).toHaveClass("size-huge");
+  });
 });
