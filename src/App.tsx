@@ -7,7 +7,17 @@ import { Lobby } from "./ui/Lobby";
 
 const TOKEN_KEY = "table-sparks-guest-token";
 const NAME_KEY = "table-sparks-guest-name";
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN?.replace(/\/$/, "") ?? "";
+const DEPLOYED_WORKER_ORIGIN = "https://table-sparks.neil27.workers.dev";
+const API_ORIGIN = resolveApiOrigin(window.location.hostname, import.meta.env.VITE_API_ORIGIN);
+
+export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
+  const cleanEnvOrigin = envOrigin?.replace(/\/$/, "") ?? "";
+  if (cleanEnvOrigin) return cleanEnvOrigin;
+  if (hostname === "table-sparks-game.pages.dev" || hostname.endsWith(".table-sparks-game.pages.dev")) {
+    return DEPLOYED_WORKER_ORIGIN;
+  }
+  return "";
+}
 
 export function App() {
   const [path, setPath] = useState(window.location.pathname);
