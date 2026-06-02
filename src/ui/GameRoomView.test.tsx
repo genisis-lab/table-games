@@ -446,6 +446,49 @@ describe("GameRoomView", () => {
     expect(allowed).toBe(false);
   });
 
+  it("installs a non-passive native touch listener for mobile Flappy taps", () => {
+    const addEventListener = vi.spyOn(HTMLElement.prototype, "addEventListener");
+
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const game = screen.getByRole("application", { name: "Flappy Bird" });
+    const hasPlayfieldTouchListener = addEventListener.mock.calls.some(([type, , options], index) =>
+      addEventListener.mock.contexts[index] === game &&
+      type === "touchstart" &&
+      typeof options === "object" &&
+      options !== null &&
+      "passive" in options &&
+      options.passive === false
+    );
+
+    expect(hasPlayfieldTouchListener).toBe(true);
+
+    addEventListener.mockRestore();
+  });
+
   it("creates a fresh random Flappy pipe for each new run", () => {
     const random = vi.spyOn(Math, "random")
       .mockReturnValueOnce(0.1)

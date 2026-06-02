@@ -1264,9 +1264,16 @@ const FLAPPY_BEST_KEY = "table-sparks-flappy-best";
 
 function FlappyBirdGame() {
   const [run, setRun] = useState<FlappyRun>(() => createFlappyRun(readFlappyBest()));
+  const playfieldRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const nextPipeIdRef = useRef(2);
+  const phaseRef = useRef<FlappyRun["phase"]>("ready");
+  const lastDirectInputAtRef = useRef(0);
+
+  useEffect(() => {
+    phaseRef.current = run.phase;
+  }, [run.phase]);
 
   useEffect(() => {
     if (run.phase !== "playing") return;
@@ -1306,6 +1313,42 @@ function FlappyBirdGame() {
     });
   }, []);
 
+  const flapFromDirectInput = useCallback((event: Event, source: "pointer" | "touch" | "click") => {
+    if (phaseRef.current !== "playing") return;
+
+    event.preventDefault();
+    const now = performance.now();
+    if (source === "click" && now - lastDirectInputAtRef.current < 450) return;
+    lastDirectInputAtRef.current = now;
+    flap();
+  }, [flap]);
+
+  useEffect(() => {
+    const playfield = playfieldRef.current;
+    if (!playfield) return;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      flapFromDirectInput(event, "touch");
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      flapFromDirectInput(event, "pointer");
+    };
+    const handleClick = (event: MouseEvent) => {
+      flapFromDirectInput(event, "click");
+    };
+
+    playfield.addEventListener("touchstart", handleTouchStart, { passive: false });
+    playfield.addEventListener("pointerdown", handlePointerDown, { passive: false });
+    playfield.addEventListener("click", handleClick, { passive: false });
+
+    return () => {
+      playfield.removeEventListener("touchstart", handleTouchStart);
+      playfield.removeEventListener("pointerdown", handlePointerDown);
+      playfield.removeEventListener("click", handleClick);
+    };
+  }, [flapFromDirectInput]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== " " && event.key !== "ArrowUp" && event.key !== "Enter") return;
@@ -1320,20 +1363,11 @@ function FlappyBirdGame() {
 
   return (
     <div
+      ref={playfieldRef}
       className={`flappy-game ${run.phase}`}
       role="application"
       aria-label="Flappy Bird"
       tabIndex={0}
-      onPointerDown={(event) => {
-        if (run.phase !== "playing") return;
-        event.preventDefault();
-        flap();
-      }}
-      onTouchStart={(event) => {
-        if (run.phase !== "playing") return;
-        event.preventDefault();
-        flap();
-      }}
     >
       <div className="flappy-score" aria-label="Score">
         <span>{run.score}</span>
