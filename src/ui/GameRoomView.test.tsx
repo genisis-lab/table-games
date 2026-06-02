@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Cell } from "../shared/games";
 import type { AppliedMove } from "../shared/protocol";
 import type { RoomSnapshot } from "../shared/protocol";
-import { createFlappyRun, GameRoomView } from "./GameRoomView";
+import { advanceSnakeRun, createFlappyRun, createSnakeRun, GameRoomView, queueSnakeTurn } from "./GameRoomView";
 
 const room: RoomSnapshot = {
   roomId: "room-test",
@@ -489,6 +489,39 @@ describe("GameRoomView", () => {
     addEventListener.mockRestore();
   });
 
+  it("accepts active Flappy taps from the document capture path on mobile", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const tap = new Event("touchstart", { bubbles: true, cancelable: true });
+
+    expect(document.dispatchEvent(tap)).toBe(false);
+    expect(tap.defaultPrevented).toBe(true);
+  });
+
   it("creates a fresh random Flappy pipe for each new run", () => {
     const random = vi.spyOn(Math, "random")
       .mockReturnValueOnce(0.1)
@@ -500,6 +533,48 @@ describe("GameRoomView", () => {
     expect(firstRun.best).toBe(4);
     expect(secondRun.pipes[0].gapTop).not.toBe(firstRun.pipes[0].gapTop);
     random.mockRestore();
+  });
+
+  it("queues quick Snake turns so mobile swipes do not feel dropped", () => {
+    const queued = queueSnakeTurn(queueSnakeTurn(createSnakeRun(0, "playing"), "up"), "left");
+
+    const firstStep = advanceSnakeRun(queued);
+    expect(firstStep.direction).toBe("up");
+    expect(firstStep.snake[0]).toEqual({ row: 6, column: 6 });
+
+    const secondStep = advanceSnakeRun(firstStep);
+    expect(secondStep.direction).toBe("left");
+    expect(secondStep.snake[0]).toEqual({ row: 6, column: 5 });
+  });
+
+  it("renders a larger thumb pad for Snake mobile control", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "snake",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "Snake thumb pad" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move up" })).toHaveClass("pad-up");
   });
 
   it("highlights nearly completed Dots and Boxes squares as the real scoring target", () => {

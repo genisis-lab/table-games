@@ -881,6 +881,7 @@ interface SnakeRun {
   snake: BoardPoint[];
   direction: SnakeDirection;
   queuedDirection: SnakeDirection;
+  queuedDirections: SnakeDirection[];
   food: BoardPoint;
   score: number;
   best: number;
@@ -891,6 +892,7 @@ const SNAKE_BEST_KEY = "table-sparks-snake-best";
 
 function SnakeGame() {
   const [run, setRun] = useState<SnakeRun>(() => createSnakeRun(readBestScore(SNAKE_BEST_KEY)));
+  const playfieldRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const start = useCallback(() => {
@@ -898,11 +900,14 @@ function SnakeGame() {
   }, []);
 
   const turn = useCallback((direction: SnakeDirection) => {
-    setRun((current) => {
-      if (current.phase !== "playing" || isOppositeSnakeDirection(direction, current.direction)) return current;
-      return { ...current, queuedDirection: direction };
-    });
+    setRun((current) => queueSnakeTurn(current, direction));
   }, []);
+
+  const turnFromDelta = useCallback((x: number, y: number, threshold = 18) => {
+    if (Math.max(Math.abs(x), Math.abs(y)) < threshold) return false;
+    turn(Math.abs(x) > Math.abs(y) ? (x > 0 ? "right" : "left") : y > 0 ? "down" : "up");
+    return true;
+  }, [turn]);
 
   useEffect(() => {
     if (run.phase !== "playing") return;
@@ -931,25 +936,49 @@ function SnakeGame() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [turn]);
 
+  useEffect(() => {
+    const playfield = playfieldRef.current;
+    if (!playfield) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isInteractiveControlTarget(event.target)) return;
+      event.preventDefault();
+      touchStartRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      const startPoint = touchStartRef.current;
+      if (!startPoint) return;
+      event.preventDefault();
+      if (turnFromDelta(event.clientX - startPoint.x, event.clientY - startPoint.y)) {
+        touchStartRef.current = { x: event.clientX, y: event.clientY };
+      }
+    };
+    const handlePointerEnd = () => {
+      touchStartRef.current = null;
+    };
+
+    const options = { passive: false };
+    playfield.addEventListener("pointerdown", handlePointerDown, options);
+    playfield.addEventListener("pointermove", handlePointerMove, options);
+    playfield.addEventListener("pointerup", handlePointerEnd);
+    playfield.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      playfield.removeEventListener("pointerdown", handlePointerDown);
+      playfield.removeEventListener("pointermove", handlePointerMove);
+      playfield.removeEventListener("pointerup", handlePointerEnd);
+      playfield.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, [turnFromDelta]);
+
   const cells = new Map(run.snake.map((point, index) => [`${point.row},${point.column}`, index]));
 
   return (
     <div
+      ref={playfieldRef}
       className={`snake-game ${run.phase}`}
       role="application"
       aria-label="Snake"
-      onPointerDown={(event) => {
-        touchStartRef.current = { x: event.clientX, y: event.clientY };
-      }}
-      onPointerUp={(event) => {
-        const startPoint = touchStartRef.current;
-        touchStartRef.current = null;
-        if (!startPoint) return;
-        const x = event.clientX - startPoint.x;
-        const y = event.clientY - startPoint.y;
-        if (Math.max(Math.abs(x), Math.abs(y)) < 22) return;
-        turn(Math.abs(x) > Math.abs(y) ? (x > 0 ? "right" : "left") : y > 0 ? "down" : "up");
-      }}
     >
       <div className="arcade-score">
         <span>{run.score}</span>
@@ -969,11 +998,12 @@ function SnakeGame() {
           );
         })}
       </div>
-      <div className="snake-controls" aria-label="Snake controls">
-        <button type="button" aria-label="Move up" onClick={() => turn("up")}><ArrowUp size={18} /></button>
-        <button type="button" aria-label="Move left" onClick={() => turn("left")}><ArrowLeft size={18} /></button>
-        <button type="button" aria-label="Move down" onClick={() => turn("down")}><ArrowDown size={18} /></button>
-        <button type="button" aria-label="Move right" onClick={() => turn("right")}><ArrowRight size={18} /></button>
+      <div className="snake-thumb-pad" role="group" aria-label="Snake thumb pad">
+        <button className="pad-up" type="button" aria-label="Move up" onClick={() => turn("up")}><ArrowUp size={20} /></button>
+        <button className="pad-left" type="button" aria-label="Move left" onClick={() => turn("left")}><ArrowLeft size={20} /></button>
+        <span className="pad-center" aria-hidden="true" />
+        <button className="pad-right" type="button" aria-label="Move right" onClick={() => turn("right")}><ArrowRight size={20} /></button>
+        <button className="pad-down" type="button" aria-label="Move down" onClick={() => turn("down")}><ArrowDown size={20} /></button>
       </div>
       {run.phase !== "playing" ? (
         <button className="arcade-start" type="button" aria-label="Start snake" onClick={start}>
@@ -985,7 +1015,7 @@ function SnakeGame() {
   );
 }
 
-function createSnakeRun(best: number, phase: SnakeRun["phase"] = "ready"): SnakeRun {
+export function createSnakeRun(best: number, phase: SnakeRun["phase"] = "ready"): SnakeRun {
   const snake = [
     { row: 7, column: 6 },
     { row: 7, column: 5 },
@@ -997,17 +1027,31 @@ function createSnakeRun(best: number, phase: SnakeRun["phase"] = "ready"): Snake
     snake,
     direction: "right",
     queuedDirection: "right",
+    queuedDirections: [],
     food: randomSnakeFood(snake),
     score: 0,
     best
   };
 }
 
-function advanceSnakeRun(run: SnakeRun): SnakeRun {
+export function queueSnakeTurn(run: SnakeRun, direction: SnakeDirection): SnakeRun {
   if (run.phase !== "playing") return run;
-  const direction = isOppositeSnakeDirection(run.queuedDirection, run.direction)
-    ? run.direction
-    : run.queuedDirection;
+  const lastQueuedDirection = run.queuedDirections.at(-1) ?? run.direction;
+  if (direction === lastQueuedDirection || isOppositeSnakeDirection(direction, lastQueuedDirection)) return run;
+  const queuedDirections = [...run.queuedDirections, direction].slice(0, 3);
+  return {
+    ...run,
+    queuedDirection: queuedDirections.at(-1) ?? run.direction,
+    queuedDirections
+  };
+}
+
+export function advanceSnakeRun(run: SnakeRun): SnakeRun {
+  if (run.phase !== "playing") return run;
+  const [queuedDirection, ...remainingDirections] = run.queuedDirections;
+  const direction = queuedDirection && !isOppositeSnakeDirection(queuedDirection, run.direction)
+    ? queuedDirection
+    : run.direction;
   const head = run.snake[0];
   const nextHead = moveSnakePoint(head, direction);
   const eats = nextHead.row === run.food.row && nextHead.column === run.food.column;
@@ -1019,7 +1063,7 @@ function advanceSnakeRun(run: SnakeRun): SnakeRun {
     nextHead.column >= SNAKE_SIZE ||
     body.some((point) => point.row === nextHead.row && point.column === nextHead.column);
 
-  if (crashed) return { ...run, phase: "lost", direction, queuedDirection: direction };
+  if (crashed) return { ...run, phase: "lost", direction, queuedDirection: direction, queuedDirections: [] };
 
   const snake = [nextHead, ...body];
   const score = run.score + (eats ? 1 : 0);
@@ -1027,7 +1071,8 @@ function advanceSnakeRun(run: SnakeRun): SnakeRun {
     ...run,
     snake,
     direction,
-    queuedDirection: direction,
+    queuedDirection: remainingDirections.at(-1) ?? direction,
+    queuedDirections: remainingDirections,
     score,
     food: eats ? randomSnakeFood(snake) : run.food
   };
@@ -1269,7 +1314,7 @@ function FlappyBirdGame() {
   const lastFrameRef = useRef<number | null>(null);
   const nextPipeIdRef = useRef(2);
   const phaseRef = useRef<FlappyRun["phase"]>("ready");
-  const lastDirectInputAtRef = useRef(0);
+  const lastDirectInputAtRef = useRef(-Infinity);
 
   useEffect(() => {
     phaseRef.current = run.phase;
@@ -1315,10 +1360,12 @@ function FlappyBirdGame() {
 
   const flapFromDirectInput = useCallback((event: Event, source: "pointer" | "touch" | "click") => {
     if (phaseRef.current !== "playing") return;
+    if (isInteractiveControlTarget(event.target)) return;
 
     event.preventDefault();
     const now = performance.now();
-    if (source === "click" && now - lastDirectInputAtRef.current < 450) return;
+    const duplicateWindow = source === "click" ? 450 : 70;
+    if (now - lastDirectInputAtRef.current < duplicateWindow) return;
     lastDirectInputAtRef.current = now;
     flap();
   }, [flap]);
@@ -1331,7 +1378,6 @@ function FlappyBirdGame() {
       flapFromDirectInput(event, "touch");
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.pointerType === "touch") return;
       flapFromDirectInput(event, "pointer");
     };
     const handleClick = (event: MouseEvent) => {
@@ -1346,6 +1392,26 @@ function FlappyBirdGame() {
       playfield.removeEventListener("touchstart", handleTouchStart);
       playfield.removeEventListener("pointerdown", handlePointerDown);
       playfield.removeEventListener("click", handleClick);
+    };
+  }, [flapFromDirectInput]);
+
+  useEffect(() => {
+    const handleDocumentTouchStart = (event: TouchEvent) => {
+      if (!isFlappyPlayTarget(event.target)) return;
+      flapFromDirectInput(event, "touch");
+    };
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (!isFlappyPlayTarget(event.target)) return;
+      flapFromDirectInput(event, "pointer");
+    };
+
+    const options = { capture: true, passive: false };
+    document.addEventListener("touchstart", handleDocumentTouchStart, options);
+    document.addEventListener("pointerdown", handleDocumentPointerDown, options);
+
+    return () => {
+      document.removeEventListener("touchstart", handleDocumentTouchStart, { capture: true });
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
     };
   }, [flapFromDirectInput]);
 
@@ -1508,6 +1574,16 @@ function writeBestScore(key: string, score: number): void {
 function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.matches("input, textarea, select, [contenteditable='true']");
+}
+
+function isInteractiveControlTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest("button, a, input, textarea, select, [role='button'], [contenteditable='true']"));
+}
+
+function isFlappyPlayTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true;
+  return Boolean(target.closest(".flappy-game, .board-stage.flappy-bird"));
 }
 
 function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"] }) {

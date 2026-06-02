@@ -1884,6 +1884,67 @@ button:disabled {
   box-shadow: 2px 2px 0 var(--ink);
 }
 
+.snake-thumb-pad {
+  display: grid;
+  grid-template-columns: repeat(3, clamp(58px, 16vw, 76px));
+  grid-template-rows: repeat(3, clamp(48px, 13vw, 64px));
+  justify-content: center;
+  gap: 8px;
+  touch-action: none;
+  user-select: none;
+}
+
+.snake-thumb-pad button,
+.snake-thumb-pad .pad-center {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+}
+
+.snake-thumb-pad button {
+  background: var(--paper-strong);
+  box-shadow: 3px 3px 0 var(--ink);
+  color: var(--ink);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.snake-thumb-pad button:active {
+  transform: translate(2px, 2px);
+  background: var(--yellow);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.snake-thumb-pad .pad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.snake-thumb-pad .pad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.snake-thumb-pad .pad-center {
+  grid-column: 2;
+  grid-row: 2;
+  background:
+    radial-gradient(circle, var(--mint) 0 24%, transparent 25%),
+    rgb(255 255 255 / 13%);
+}
+
+.snake-thumb-pad .pad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.snake-thumb-pad .pad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
 .arcade-start {
   display: inline-flex;
   align-items: center;
