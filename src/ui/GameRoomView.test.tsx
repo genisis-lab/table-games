@@ -446,37 +446,6 @@ describe("GameRoomView", () => {
     expect(allowed).toBe(false);
   });
 
-  it("shows a dedicated Flappy control once a run starts", () => {
-    render(
-      <GameRoomView
-        room={{
-          ...room,
-          gameId: "flappy-bird",
-          opponent: "bot",
-          players: [room.players[0]],
-          board: [[null]]
-        }}
-        guestToken="red-token"
-        inviteUrl="https://table-sparks.test/room/room-test"
-        copiedInvite={false}
-        onCopyInvite={vi.fn()}
-        onMove={vi.fn()}
-        onChat={vi.fn()}
-        onReaction={vi.fn()}
-        onRematch={vi.fn()}
-        onRequestUndo={vi.fn()}
-        onClaimSeat={vi.fn()}
-        onSwitchGame={vi.fn()}
-        onSetBoardVariant={vi.fn()}
-        onSetBotDifficulty={vi.fn()}
-      />
-    );
-
-    expect(screen.queryByRole("button", { name: "Flap" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    expect(screen.getByRole("button", { name: "Flap" })).toHaveTextContent("FLAP");
-  });
-
   it("shows arcade debug details from the room URL", () => {
     window.history.pushState({}, "", "/room/room-test?arcadeDebug=1");
 
@@ -510,15 +479,15 @@ describe("GameRoomView", () => {
       expect(debug).toHaveTextContent("Arcade debug");
       expect(debug).toHaveTextContent("bundle");
       fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-      fireEvent.pointerDown(screen.getByRole("button", { name: "Flap" }));
-      expect(debug).toHaveTextContent("button/pointerdown");
+      fireEvent.pointerDown(screen.getByRole("application", { name: "Flappy Bird" }));
+      expect(debug).toHaveTextContent("pointer/pointerdown");
     } finally {
       window.history.pushState({}, "", "/");
     }
   });
 
-  it("installs a non-passive native touch listener for mobile Flappy taps", () => {
-    const addEventListener = vi.spyOn(HTMLElement.prototype, "addEventListener");
+  it("installs a non-passive document touch listener for mobile Flappy taps", () => {
+    const addEventListener = vi.spyOn(document, "addEventListener");
 
     render(
       <GameRoomView
@@ -545,22 +514,22 @@ describe("GameRoomView", () => {
       />
     );
 
-    const game = screen.getByRole("application", { name: "Flappy Bird" });
-    const hasPlayfieldTouchListener = addEventListener.mock.calls.some(([type, , options], index) =>
-      addEventListener.mock.contexts[index] === game &&
+    const hasDocumentTouchListener = addEventListener.mock.calls.some(([type, , options]) =>
       type === "touchstart" &&
       typeof options === "object" &&
       options !== null &&
+      "capture" in options &&
+      options.capture === true &&
       "passive" in options &&
       options.passive === false
     );
 
-    expect(hasPlayfieldTouchListener).toBe(true);
+    expect(hasDocumentTouchListener).toBe(true);
 
     addEventListener.mockRestore();
   });
 
-  it("accepts active Flappy taps from the document capture path on mobile", () => {
+  it("accepts active Flappy taps even when mobile reports the page body as the target", () => {
     render(
       <GameRoomView
         room={{
@@ -589,8 +558,9 @@ describe("GameRoomView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     const tap = new Event("touchstart", { bubbles: true, cancelable: true });
 
-    expect(document.dispatchEvent(tap)).toBe(false);
+    expect(document.body.dispatchEvent(tap)).toBe(false);
     expect(tap.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("button", { name: "Flap" })).not.toBeInTheDocument();
   });
 
   it("creates a fresh random Flappy pipe for each new run", () => {

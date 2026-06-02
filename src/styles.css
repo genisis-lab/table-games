@@ -1771,31 +1771,6 @@ button:disabled {
   font-weight: 950;
 }
 
-.flappy-flap-button {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 12px;
-  z-index: 9;
-  display: grid;
-  min-height: 52px;
-  place-items: center;
-  border: 3px solid var(--ink);
-  border-radius: var(--radius);
-  background: var(--red);
-  color: #fff;
-  box-shadow: 4px 4px 0 var(--ink);
-  font-size: 1rem;
-  font-weight: 950;
-  letter-spacing: 0;
-  touch-action: none;
-}
-
-.flappy-flap-button:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 var(--ink);
-}
-
 .flappy-game.crashed .flappy-bird-sprite {
   animation: cell-pop 0.28s ease-out both;
 }

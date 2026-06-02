@@ -1377,6 +1377,7 @@ function FlappyBirdGame() {
   const lastFrameRef = useRef<number | null>(null);
   const nextPipeIdRef = useRef(2);
   const phaseRef = useRef<FlappyRun["phase"]>("ready");
+  const pendingFlapRef = useRef(false);
   const lastDirectInputAtRef = useRef(-Infinity);
 
   useEffect(() => {
@@ -1409,7 +1410,9 @@ function FlappyBirdGame() {
       const previous = lastFrameRef.current ?? time;
       const delta = Math.min((time - previous) / 1000, 0.034);
       lastFrameRef.current = time;
-      setRun((current) => advanceFlappyRun(current, delta, nextPipeIdRef));
+      const shouldFlap = pendingFlapRef.current;
+      pendingFlapRef.current = false;
+      setRun((current) => advanceFlappyRun(current, delta, nextPipeIdRef, shouldFlap));
       frameRef.current = window.requestAnimationFrame(tick);
     };
 
@@ -1434,6 +1437,7 @@ function FlappyBirdGame() {
   }, []);
 
   const flap = useCallback(() => {
+    pendingFlapRef.current = true;
     setRun((current) => {
       if (current.phase !== "playing") return current;
       return { ...current, velocity: FLAPPY_LIFT };
@@ -1472,12 +1476,6 @@ function FlappyBirdGame() {
     triggerFlap(source, event.type, event.target, event.defaultPrevented);
   }, [recordDebugEvent, triggerFlap]);
 
-  const pressFlapButton = useCallback((event: ArcadePressEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    triggerFlap("button", event.type, event.currentTarget, true);
-  }, [triggerFlap]);
-
   const start = useCallback((event: ArcadePressEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1486,47 +1484,25 @@ function FlappyBirdGame() {
   }, [recordDebugEvent, startRun]);
 
   useEffect(() => {
-    const playfield = playfieldRef.current;
-    if (!playfield) return;
-
-    const handleTouchStart = (event: TouchEvent) => {
-      flapFromDirectInput(event, "touch");
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      flapFromDirectInput(event, "pointer");
-    };
-    const handleClick = (event: MouseEvent) => {
-      flapFromDirectInput(event, "click");
-    };
-
-    playfield.addEventListener("touchstart", handleTouchStart, { passive: false });
-    playfield.addEventListener("pointerdown", handlePointerDown, { passive: false });
-    playfield.addEventListener("click", handleClick, { passive: false });
-
-    return () => {
-      playfield.removeEventListener("touchstart", handleTouchStart);
-      playfield.removeEventListener("pointerdown", handlePointerDown);
-      playfield.removeEventListener("click", handleClick);
-    };
-  }, [flapFromDirectInput]);
-
-  useEffect(() => {
     const handleDocumentTouchStart = (event: TouchEvent) => {
-      if (!isFlappyPlayTarget(event.target)) return;
       flapFromDirectInput(event, "touch");
     };
     const handleDocumentPointerDown = (event: PointerEvent) => {
-      if (!isFlappyPlayTarget(event.target)) return;
       flapFromDirectInput(event, "pointer");
+    };
+    const handleDocumentClick = (event: MouseEvent) => {
+      flapFromDirectInput(event, "click");
     };
 
     const options = { capture: true, passive: false };
     document.addEventListener("touchstart", handleDocumentTouchStart, options);
     document.addEventListener("pointerdown", handleDocumentPointerDown, options);
+    document.addEventListener("click", handleDocumentClick, { capture: true });
 
     return () => {
       document.removeEventListener("touchstart", handleDocumentTouchStart, { capture: true });
       document.removeEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
+      document.removeEventListener("click", handleDocumentClick, { capture: true });
     };
   }, [flapFromDirectInput]);
 
@@ -1577,18 +1553,6 @@ function FlappyBirdGame() {
       <div className="flappy-cloud one" />
       <div className="flappy-cloud two" />
       <div className="flappy-ground" />
-      {run.phase === "playing" ? (
-        <button
-          className="flappy-flap-button"
-          type="button"
-          aria-label="Flap"
-          onPointerDown={pressFlapButton}
-          onTouchStart={pressFlapButton}
-          onClick={pressFlapButton}
-        >
-          FLAP
-        </button>
-      ) : null}
       {debugEnabled ? (
         <ArcadeDebugPanel
           game="Flappy Bird"
@@ -1628,11 +1592,13 @@ export function createFlappyRun(
 function advanceFlappyRun(
   run: FlappyRun,
   delta: number,
-  nextPipeIdRef: { current: number }
+  nextPipeIdRef: { current: number },
+  shouldFlap = false
 ): FlappyRun {
   if (run.phase !== "playing") return run;
 
-  const velocity = run.velocity + FLAPPY_GRAVITY * delta;
+  const startingVelocity = shouldFlap ? FLAPPY_LIFT : run.velocity;
+  const velocity = startingVelocity + FLAPPY_GRAVITY * delta;
   const birdY = run.birdY + velocity * delta;
   let score = run.score;
   let pipes = run.pipes
@@ -1715,11 +1681,6 @@ function isTextInputTarget(target: EventTarget | null): boolean {
 function isInteractiveControlTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(target.closest("button, a, input, textarea, select, [role='button'], [contenteditable='true']"));
-}
-
-function isFlappyPlayTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return true;
-  return Boolean(target.closest(".flappy-game, .board-stage.flappy-bird"));
 }
 
 function useArcadeDebugEnabled(): boolean {
