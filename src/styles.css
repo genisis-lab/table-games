@@ -1771,6 +1771,31 @@ button:disabled {
   font-weight: 950;
 }
 
+.flappy-flap-button {
+  position: absolute;
+  right: 14px;
+  bottom: 92px;
+  z-index: 9;
+  display: grid;
+  min-width: 92px;
+  min-height: 58px;
+  place-items: center;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--red);
+  color: #fff;
+  box-shadow: 4px 4px 0 var(--ink);
+  font-size: 1rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  touch-action: none;
+}
+
+.flappy-flap-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
 .flappy-game.crashed .flappy-bird-sprite {
   animation: cell-pop 0.28s ease-out both;
 }
@@ -1943,6 +1968,66 @@ button:disabled {
 .snake-thumb-pad .pad-down {
   grid-column: 2;
   grid-row: 3;
+}
+
+.arcade-debug-panel {
+  position: absolute;
+  z-index: 20;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  max-height: 42%;
+  overflow: hidden;
+  padding: 8px;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: rgb(255 253 247 / 92%);
+  box-shadow: 3px 3px 0 var(--ink);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.arcade-debug-panel strong {
+  display: block;
+  margin-bottom: 5px;
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+.arcade-debug-panel dl {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.arcade-debug-panel div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 5px;
+}
+
+.arcade-debug-panel dt,
+.arcade-debug-panel dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arcade-debug-panel dt {
+  font-weight: 950;
+}
+
+.flappy-game .arcade-debug-panel {
+  top: 10px;
+  right: auto;
+  bottom: auto;
+  width: min(88%, 310px);
+  max-height: 34%;
 }
 
 .arcade-start {

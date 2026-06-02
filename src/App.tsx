@@ -7,6 +7,7 @@ import { Lobby } from "./ui/Lobby";
 
 const TOKEN_KEY = "table-sparks-guest-token";
 const NAME_KEY = "table-sparks-guest-name";
+const ARCADE_DEBUG_KEY = "table-sparks-arcade-debug";
 const DEPLOYED_WORKER_ORIGIN = "https://table-sparks.neil27.workers.dev";
 const API_ORIGIN = resolveApiOrigin(window.location.hostname, import.meta.env.VITE_API_ORIGIN);
 
@@ -29,6 +30,10 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    syncArcadeDebugFlagFromUrl();
+  }, [path]);
 
   const navigate = useCallback((nextPath: string) => {
     window.history.pushState({}, "", nextPath);
@@ -259,6 +264,17 @@ function socketUrl(roomId: string): string {
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/api/rooms/${roomId}/socket`;
+}
+
+export function syncArcadeDebugFlagFromUrl(): void {
+  const params = new URLSearchParams(window.location.search);
+  const debug = params.get("debug")?.toLowerCase();
+  if (params.get("arcadeDebug") === "1" || debug === "arcade" || debug === "1") {
+    localStorage.setItem(ARCADE_DEBUG_KEY, "1");
+  }
+  if (params.get("arcadeDebug") === "0" || debug === "0" || debug === "off") {
+    localStorage.removeItem(ARCADE_DEBUG_KEY);
+  }
 }
 
 function apiUrl(path: string): string {

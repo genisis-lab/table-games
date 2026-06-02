@@ -889,24 +889,67 @@ interface SnakeRun {
 
 const SNAKE_SIZE = 14;
 const SNAKE_BEST_KEY = "table-sparks-snake-best";
+const ARCADE_DEBUG_KEY = "table-sparks-arcade-debug";
+
+type ArcadeInputSource = "button" | "click" | "key" | "pad" | "pointer" | "swipe" | "touch";
+
+interface ArcadeDebugEvent {
+  at: string;
+  duplicate: boolean;
+  phase: string;
+  prevented: boolean;
+  source: ArcadeInputSource;
+  target: string;
+  type: string;
+}
+
+interface ArcadePressEvent {
+  currentTarget: EventTarget;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+  type: string;
+}
 
 function SnakeGame() {
   const [run, setRun] = useState<SnakeRun>(() => createSnakeRun(readBestScore(SNAKE_BEST_KEY)));
+  const debugEnabled = useArcadeDebugEnabled();
+  const [debugEvent, setDebugEvent] = useState<ArcadeDebugEvent | null>(null);
   const playfieldRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
+  const recordDebugEvent = useCallback((source: ArcadeInputSource, type: string, target: EventTarget | null, prevented = false) => {
+    if (!debugEnabled) return;
+    setDebugEvent({
+      at: new Date().toLocaleTimeString(),
+      duplicate: false,
+      phase: run.phase,
+      prevented,
+      source,
+      target: describeEventTarget(target),
+      type
+    });
+  }, [debugEnabled, run.phase]);
+
   const start = useCallback(() => {
     setRun((current) => createSnakeRun(current.best, "playing"));
-  }, []);
+    recordDebugEvent("button", "start", null);
+  }, [recordDebugEvent]);
 
-  const turn = useCallback((direction: SnakeDirection) => {
+  const turn = useCallback((direction: SnakeDirection, source: ArcadeInputSource = "button", type = "turn", target: EventTarget | null = null, prevented = false) => {
+    recordDebugEvent(source, `${type}:${direction}`, target, prevented);
     setRun((current) => queueSnakeTurn(current, direction));
-  }, []);
+  }, [recordDebugEvent]);
 
-  const turnFromDelta = useCallback((x: number, y: number, threshold = 18) => {
+  const turnFromDelta = useCallback((x: number, y: number, target: EventTarget | null, threshold = 18) => {
     if (Math.max(Math.abs(x), Math.abs(y)) < threshold) return false;
-    turn(Math.abs(x) > Math.abs(y) ? (x > 0 ? "right" : "left") : y > 0 ? "down" : "up");
+    turn(Math.abs(x) > Math.abs(y) ? (x > 0 ? "right" : "left") : y > 0 ? "down" : "up", "swipe", "pointermove", target, true);
     return true;
+  }, [turn]);
+
+  const pressPad = useCallback((direction: SnakeDirection) => (event: ArcadePressEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    turn(direction, "pad", event.type, event.currentTarget, true);
   }, [turn]);
 
   useEffect(() => {
@@ -929,7 +972,7 @@ function SnakeGame() {
       const direction = snakeDirectionFromKey(event.key);
       if (!direction || isTextInputTarget(event.target)) return;
       event.preventDefault();
-      turn(direction);
+      turn(direction, "key", event.type, event.target, true);
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -949,7 +992,7 @@ function SnakeGame() {
       const startPoint = touchStartRef.current;
       if (!startPoint) return;
       event.preventDefault();
-      if (turnFromDelta(event.clientX - startPoint.x, event.clientY - startPoint.y)) {
+      if (turnFromDelta(event.clientX - startPoint.x, event.clientY - startPoint.y, event.target)) {
         touchStartRef.current = { x: event.clientX, y: event.clientY };
       }
     };
@@ -999,12 +1042,25 @@ function SnakeGame() {
         })}
       </div>
       <div className="snake-thumb-pad" role="group" aria-label="Snake thumb pad">
-        <button className="pad-up" type="button" aria-label="Move up" onClick={() => turn("up")}><ArrowUp size={20} /></button>
-        <button className="pad-left" type="button" aria-label="Move left" onClick={() => turn("left")}><ArrowLeft size={20} /></button>
+        <button className="pad-up" type="button" aria-label="Move up" onPointerDown={pressPad("up")} onTouchStart={pressPad("up")} onClick={pressPad("up")}><ArrowUp size={20} /></button>
+        <button className="pad-left" type="button" aria-label="Move left" onPointerDown={pressPad("left")} onTouchStart={pressPad("left")} onClick={pressPad("left")}><ArrowLeft size={20} /></button>
         <span className="pad-center" aria-hidden="true" />
-        <button className="pad-right" type="button" aria-label="Move right" onClick={() => turn("right")}><ArrowRight size={20} /></button>
-        <button className="pad-down" type="button" aria-label="Move down" onClick={() => turn("down")}><ArrowDown size={20} /></button>
+        <button className="pad-right" type="button" aria-label="Move right" onPointerDown={pressPad("right")} onTouchStart={pressPad("right")} onClick={pressPad("right")}><ArrowRight size={20} /></button>
+        <button className="pad-down" type="button" aria-label="Move down" onPointerDown={pressPad("down")} onTouchStart={pressPad("down")} onClick={pressPad("down")}><ArrowDown size={20} /></button>
       </div>
+      {debugEnabled ? (
+        <ArcadeDebugPanel
+          game="Snake"
+          rows={[
+            ["phase", run.phase],
+            ["direction", run.direction],
+            ["queue", run.queuedDirections.join(" > ") || "empty"],
+            ["score", String(run.score)],
+            ["head", `${run.snake[0]?.row ?? "-"},${run.snake[0]?.column ?? "-"}`]
+          ]}
+          event={debugEvent}
+        />
+      ) : null}
       {run.phase !== "playing" ? (
         <button className="arcade-start" type="button" aria-label="Start snake" onClick={start}>
           <Play size={17} />
@@ -1309,6 +1365,8 @@ const FLAPPY_BEST_KEY = "table-sparks-flappy-best";
 
 function FlappyBirdGame() {
   const [run, setRun] = useState<FlappyRun>(() => createFlappyRun(readFlappyBest()));
+  const debugEnabled = useArcadeDebugEnabled();
+  const [debugEvent, setDebugEvent] = useState<ArcadeDebugEvent | null>(null);
   const playfieldRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
@@ -1319,6 +1377,25 @@ function FlappyBirdGame() {
   useEffect(() => {
     phaseRef.current = run.phase;
   }, [run.phase]);
+
+  const recordDebugEvent = useCallback((
+    source: ArcadeInputSource,
+    type: string,
+    target: EventTarget | null,
+    prevented: boolean,
+    duplicate = false
+  ) => {
+    if (!debugEnabled) return;
+    setDebugEvent({
+      at: new Date().toLocaleTimeString(),
+      duplicate,
+      phase: phaseRef.current,
+      prevented,
+      source,
+      target: describeEventTarget(target),
+      type
+    });
+  }, [debugEnabled]);
 
   useEffect(() => {
     if (run.phase !== "playing") return;
@@ -1358,17 +1435,50 @@ function FlappyBirdGame() {
     });
   }, []);
 
+  const triggerFlap = useCallback((
+    source: ArcadeInputSource,
+    type: string,
+    target: EventTarget | null,
+    prevented: boolean
+  ) => {
+    if (phaseRef.current !== "playing") {
+      recordDebugEvent(source, type, target, prevented);
+      return;
+    }
+
+    const now = performance.now();
+    const duplicateWindow = source === "click" ? 450 : 70;
+    const duplicate = now - lastDirectInputAtRef.current < duplicateWindow;
+    if (duplicate) return;
+
+    lastDirectInputAtRef.current = now;
+    recordDebugEvent(source, type, target, prevented);
+    flap();
+  }, [flap, recordDebugEvent]);
+
   const flapFromDirectInput = useCallback((event: Event, source: "pointer" | "touch" | "click") => {
-    if (phaseRef.current !== "playing") return;
+    if (phaseRef.current !== "playing") {
+      recordDebugEvent(source, event.type, event.target, event.defaultPrevented);
+      return;
+    }
     if (isInteractiveControlTarget(event.target)) return;
 
     event.preventDefault();
-    const now = performance.now();
-    const duplicateWindow = source === "click" ? 450 : 70;
-    if (now - lastDirectInputAtRef.current < duplicateWindow) return;
-    lastDirectInputAtRef.current = now;
-    flap();
-  }, [flap]);
+    triggerFlap(source, event.type, event.target, event.defaultPrevented);
+  }, [recordDebugEvent, triggerFlap]);
+
+  const pressFlapButton = useCallback((event: ArcadePressEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    triggerFlap("button", event.type, event.currentTarget, true);
+  }, [triggerFlap]);
+
+  const start = useCallback((event: ArcadePressEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    recordDebugEvent("button", event.type, event.currentTarget, false);
+    setRun((current) => startRun(current.best));
+  }, [recordDebugEvent, startRun]);
 
   useEffect(() => {
     const playfield = playfieldRef.current;
@@ -1420,12 +1530,12 @@ function FlappyBirdGame() {
       if (event.key !== " " && event.key !== "ArrowUp" && event.key !== "Enter") return;
       if (isTextInputTarget(event.target)) return;
       event.preventDefault();
-      flap();
+      triggerFlap("key", event.type, event.target, event.defaultPrevented);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [flap]);
+  }, [triggerFlap]);
 
   return (
     <div
@@ -1462,11 +1572,32 @@ function FlappyBirdGame() {
       <div className="flappy-cloud one" />
       <div className="flappy-cloud two" />
       <div className="flappy-ground" />
+      {run.phase === "playing" ? (
+        <button
+          className="flappy-flap-button"
+          type="button"
+          aria-label="Flap"
+          onPointerDown={pressFlapButton}
+          onTouchStart={pressFlapButton}
+          onClick={pressFlapButton}
+        >
+          FLAP
+        </button>
+      ) : null}
+      {debugEnabled ? (
+        <ArcadeDebugPanel
+          game="Flappy Bird"
+          rows={[
+            ["phase", run.phase],
+            ["bird", `${run.birdY.toFixed(1)} / ${run.velocity.toFixed(1)}`],
+            ["score", String(run.score)],
+            ["pipes", run.pipes.map((pipe) => `${pipe.x.toFixed(0)}:${pipe.gapTop}`).join(", ")]
+          ]}
+          event={debugEvent}
+        />
+      ) : null}
       {run.phase !== "playing" ? (
-        <button className="flappy-start" type="button" aria-label="Start run" onClick={(event) => {
-          event.stopPropagation();
-          setRun((current) => startRun(current.best));
-        }}>
+        <button className="flappy-start" type="button" aria-label="Start run" onClick={start}>
           {run.phase === "crashed" ? "Again" : "Start"}
         </button>
       ) : null}
@@ -1584,6 +1715,83 @@ function isInteractiveControlTarget(target: EventTarget | null): boolean {
 function isFlappyPlayTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true;
   return Boolean(target.closest(".flappy-game, .board-stage.flappy-bird"));
+}
+
+function useArcadeDebugEnabled(): boolean {
+  return useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get("debug")?.toLowerCase();
+    if (params.get("arcadeDebug") === "1" || debug === "arcade" || debug === "1") {
+      localStorage.setItem(ARCADE_DEBUG_KEY, "1");
+      return true;
+    }
+    if (params.get("arcadeDebug") === "0" || debug === "0" || debug === "off") {
+      localStorage.removeItem(ARCADE_DEBUG_KEY);
+      return false;
+    }
+    return localStorage.getItem(ARCADE_DEBUG_KEY) === "1";
+  }, []);
+}
+
+function ArcadeDebugPanel({
+  event,
+  game,
+  rows
+}: {
+  event: ArcadeDebugEvent | null;
+  game: string;
+  rows: [string, string][];
+}) {
+  const viewport = typeof window === "undefined"
+    ? "unknown"
+    : `${window.innerWidth}x${window.innerHeight} @${window.devicePixelRatio || 1}`;
+  const userAgent = typeof navigator === "undefined" ? "unknown" : navigator.userAgent;
+  const debugRows: [string, string][] = [
+    ["bundle", readClientBundleId()],
+    ["viewport", viewport],
+    ...rows,
+    ["event", event ? `${event.source}/${event.type}` : "none"],
+    ["target", event?.target ?? "-"],
+    ["prevented", event ? String(event.prevented) : "-"],
+    ["duplicate", event ? String(event.duplicate) : "-"],
+    ["time", event?.at ?? "-"],
+    ["browser", userAgent.slice(0, 72)]
+  ];
+
+  return (
+    <aside className="arcade-debug-panel" aria-label={`${game} debug`}>
+      <strong>Arcade debug</strong>
+      <dl>
+        {debugRows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </aside>
+  );
+}
+
+function readClientBundleId(): string {
+  if (typeof document === "undefined") return "test";
+  const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>("script[src]"));
+  const script = scripts.find((item) => /\/assets\/index-[\w-]+\.js/.test(item.src));
+  const match = script?.src.match(/index-([\w-]+)\.js/);
+  return match?.[1] ?? "dev";
+}
+
+function describeEventTarget(target: EventTarget | null): string {
+  if (target === document) return "document";
+  if (target === window) return "window";
+  if (!(target instanceof Element)) return target ? "event-target" : "-";
+
+  const tag = target.tagName.toLowerCase();
+  const id = target.id ? `#${target.id}` : "";
+  const classes = Array.from(target.classList).slice(0, 3).map((className) => `.${className}`).join("");
+  const label = target.getAttribute("aria-label");
+  return `${tag}${id}${classes}${label ? `[${label}]` : ""}`;
 }
 
 function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"] }) {

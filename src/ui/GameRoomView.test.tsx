@@ -446,6 +446,77 @@ describe("GameRoomView", () => {
     expect(allowed).toBe(false);
   });
 
+  it("shows a dedicated Flappy control once a run starts", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Flap" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    expect(screen.getByRole("button", { name: "Flap" })).toHaveTextContent("FLAP");
+  });
+
+  it("shows arcade debug details from the room URL", () => {
+    window.history.pushState({}, "", "/room/room-test?arcadeDebug=1");
+
+    try {
+      render(
+        <GameRoomView
+          room={{
+            ...room,
+            gameId: "flappy-bird",
+            opponent: "bot",
+            players: [room.players[0]],
+            board: [[null]]
+          }}
+          guestToken="red-token"
+          inviteUrl="https://table-sparks.test/room/room-test"
+          copiedInvite={false}
+          onCopyInvite={vi.fn()}
+          onMove={vi.fn()}
+          onChat={vi.fn()}
+          onReaction={vi.fn()}
+          onRematch={vi.fn()}
+          onRequestUndo={vi.fn()}
+          onClaimSeat={vi.fn()}
+          onSwitchGame={vi.fn()}
+          onSetBoardVariant={vi.fn()}
+          onSetBotDifficulty={vi.fn()}
+        />
+      );
+
+      const debug = screen.getByLabelText("Flappy Bird debug");
+      expect(debug).toHaveTextContent("Arcade debug");
+      expect(debug).toHaveTextContent("bundle");
+      fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Flap" }));
+      expect(debug).toHaveTextContent("button/pointerdown");
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("installs a non-passive native touch listener for mobile Flappy taps", () => {
     const addEventListener = vi.spyOn(HTMLElement.prototype, "addEventListener");
 
