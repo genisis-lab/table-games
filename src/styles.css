@@ -1773,12 +1773,12 @@ button:disabled {
 
 .flappy-flap-button {
   position: absolute;
+  left: 14px;
   right: 14px;
-  bottom: 92px;
+  bottom: 12px;
   z-index: 9;
   display: grid;
-  min-width: 92px;
-  min-height: 58px;
+  min-height: 52px;
   place-items: center;
   border: 3px solid var(--ink);
   border-radius: var(--radius);

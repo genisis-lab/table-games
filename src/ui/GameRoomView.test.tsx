@@ -606,6 +606,12 @@ describe("GameRoomView", () => {
     random.mockRestore();
   });
 
+  it("starts Flappy Bird with a forgiving first pipe distance", () => {
+    const firstRun = createFlappyRun(0, "playing");
+
+    expect(firstRun.pipes[0].x).toBeGreaterThanOrEqual(570);
+  });
+
   it("queues quick Snake turns so mobile swipes do not feel dropped", () => {
     const queued = queueSnakeTurn(queueSnakeTurn(createSnakeRun(0, "playing"), "up"), "left");
 

@@ -1360,7 +1360,12 @@ const FLAPPY_GROUND = 78;
 const FLAPPY_BIRD_X = 116;
 const FLAPPY_BIRD_SIZE = 34;
 const FLAPPY_PIPE_WIDTH = 66;
-const FLAPPY_GAP = 158;
+const FLAPPY_GAP = 186;
+const FLAPPY_GRAVITY = 820;
+const FLAPPY_LIFT = -330;
+const FLAPPY_PIPE_SPEED = 126;
+const FLAPPY_PIPE_SPACING = 238;
+const FLAPPY_FIRST_PIPE_X = FLAPPY_WIDTH + 170;
 const FLAPPY_BEST_KEY = "table-sparks-flappy-best";
 
 function FlappyBirdGame() {
@@ -1425,13 +1430,13 @@ function FlappyBirdGame() {
 
   const startRun = useCallback((best: number) => {
     nextPipeIdRef.current = 2;
-    return createFlappyRun(best, "playing", -345);
+    return createFlappyRun(best, "playing", FLAPPY_LIFT);
   }, []);
 
   const flap = useCallback(() => {
     setRun((current) => {
       if (current.phase !== "playing") return current;
-      return { ...current, velocity: -345 };
+      return { ...current, velocity: FLAPPY_LIFT };
     });
   }, []);
 
@@ -1614,7 +1619,7 @@ export function createFlappyRun(
     phase,
     birdY: 250,
     velocity,
-    pipes: [makePipe(FLAPPY_WIDTH + 34, 1)],
+    pipes: [makePipe(FLAPPY_FIRST_PIPE_X, 1)],
     score: 0,
     best
   };
@@ -1627,12 +1632,12 @@ function advanceFlappyRun(
 ): FlappyRun {
   if (run.phase !== "playing") return run;
 
-  const velocity = run.velocity + 940 * delta;
+  const velocity = run.velocity + FLAPPY_GRAVITY * delta;
   const birdY = run.birdY + velocity * delta;
   let score = run.score;
   let pipes = run.pipes
     .map((pipe) => {
-      const x = pipe.x - 150 * delta;
+      const x = pipe.x - FLAPPY_PIPE_SPEED * delta;
       const scored = pipe.scored || x + FLAPPY_PIPE_WIDTH < FLAPPY_BIRD_X;
       if (!pipe.scored && scored) score += 1;
       return { ...pipe, x, scored };
@@ -1640,8 +1645,8 @@ function advanceFlappyRun(
     .filter((pipe) => pipe.x > -FLAPPY_PIPE_WIDTH - 8);
 
   const lastPipe = pipes.at(-1);
-  if (!lastPipe || lastPipe.x < FLAPPY_WIDTH - 184) {
-    pipes = [...pipes, makePipe(FLAPPY_WIDTH + 34, nextPipeIdRef.current)];
+  if (!lastPipe || lastPipe.x < FLAPPY_WIDTH - FLAPPY_PIPE_SPACING) {
+    pipes = [...pipes, makePipe(FLAPPY_WIDTH + FLAPPY_PIPE_SPACING, nextPipeIdRef.current)];
     nextPipeIdRef.current += 1;
   }
 
@@ -1668,7 +1673,7 @@ function hitsPipe(pipe: FlappyPipe, birdY: number): boolean {
   const pipeLeft = pipe.x;
   const pipeRight = pipe.x + FLAPPY_PIPE_WIDTH;
   const overlapsX = birdRight > pipeLeft && birdLeft < pipeRight;
-  const insideGap = birdTop > pipe.gapTop && birdBottom < pipe.gapTop + FLAPPY_GAP;
+  const insideGap = birdTop > pipe.gapTop - 5 && birdBottom < pipe.gapTop + FLAPPY_GAP + 5;
   return overlapsX && !insideGap;
 }
 
@@ -1676,7 +1681,7 @@ function makePipe(x: number, id: number): FlappyPipe {
   return {
     id,
     x,
-    gapTop: 106 + Math.floor(Math.random() * 258),
+    gapTop: 92 + Math.floor(Math.random() * 238),
     scored: false
   };
 }
