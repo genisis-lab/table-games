@@ -14,7 +14,6 @@ import {
   RotateCcw,
   Send,
   Sparkles,
-  Undo2,
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -51,7 +50,6 @@ export function GameRoomView({
   onChat,
   onReaction,
   onRematch,
-  onRequestUndo,
   onClaimSeat,
   onSwitchGame,
   onSetBoardVariant,
@@ -70,9 +68,6 @@ export function GameRoomView({
   const rematchText = room.rematchRequests.length > 0 && room.opponent === "friend"
     ? `Rematch vote ${room.rematchRequests.length}/${voteTarget}`
     : "Rematch";
-  const undoText = room.undoRequests.length > 0
-    ? `Undo requested ${room.undoRequests.length}/${voteTarget}`
-    : "Undo";
   const openSeat = room.opponent === "friend" && (
     room.players.some((player) => !player.connected && !player.isBot) ||
     room.players.filter((player) => !player.isBot).length < 2
@@ -249,12 +244,6 @@ export function GameRoomView({
           ) : (
             <p className="quiet-note">No moves yet.</p>
           )}
-          {currentPlayer && room.opponent === "friend" ? (
-            <button className="ghost-button compact-action" type="button" aria-label="Request undo" onClick={onRequestUndo}>
-              <Undo2 size={16} />
-              {undoText}
-            </button>
-          ) : null}
         </section>
 
         {room.spectators.length > 0 || (!currentPlayer && openSeat) ? (
@@ -1531,10 +1520,15 @@ function FlappyBirdGame() {
         <small>Best {run.best}</small>
       </div>
       <div
-        className="flappy-bird-sprite"
-        style={{ "--bird-y": `${(run.birdY / FLAPPY_HEIGHT) * 100}%`, "--bird-tilt": `${Math.max(-18, Math.min(42, run.velocity / 11))}deg` } as CSSProperties}
+        className="flappy-bird-track"
+        style={{ "--bird-y": `${(run.birdY / FLAPPY_HEIGHT) * 100}%` } as CSSProperties}
       >
-        <span />
+        <div
+          className="flappy-bird-sprite"
+          style={{ "--bird-tilt": `${Math.max(-18, Math.min(42, run.velocity / 11))}deg` } as CSSProperties}
+        >
+          <span />
+        </div>
       </div>
       {run.pipes.map((pipe) => (
         <div
@@ -1689,15 +1683,39 @@ function useArcadeDebugEnabled(): boolean {
     const params = new URLSearchParams(window.location.search);
     const debug = params.get("debug")?.toLowerCase();
     if (params.get("arcadeDebug") === "1" || debug === "arcade" || debug === "1") {
-      localStorage.setItem(ARCADE_DEBUG_KEY, "1");
+      writeLocalStorageValue(ARCADE_DEBUG_KEY, "1");
       return true;
     }
     if (params.get("arcadeDebug") === "0" || debug === "0" || debug === "off") {
-      localStorage.removeItem(ARCADE_DEBUG_KEY);
+      removeLocalStorageValue(ARCADE_DEBUG_KEY);
       return false;
     }
-    return localStorage.getItem(ARCADE_DEBUG_KEY) === "1";
+    return readLocalStorageValue(ARCADE_DEBUG_KEY) === "1";
   }, []);
+}
+
+function readLocalStorageValue(key: string): string | null {
+  try {
+    return typeof localStorage.getItem === "function" ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorageValue(key: string, value: string): void {
+  try {
+    if (typeof localStorage.setItem === "function") localStorage.setItem(key, value);
+  } catch {
+    // Debug persistence is optional.
+  }
+}
+
+function removeLocalStorageValue(key: string): void {
+  try {
+    if (typeof localStorage.removeItem === "function") localStorage.removeItem(key);
+  } catch {
+    // Debug persistence is optional.
+  }
 }
 
 function ArcadeDebugPanel({

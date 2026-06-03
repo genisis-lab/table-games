@@ -582,6 +582,36 @@ describe("GameRoomView", () => {
     expect(firstRun.pipes[0].x).toBeGreaterThanOrEqual(570);
   });
 
+  it("renders Flappy Bird inside a transform motion track", () => {
+    const { container } = render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "flappy-bird",
+          opponent: "bot",
+          players: [room.players[0]],
+          board: [[null]]
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector(".flappy-bird-track")).toBeInTheDocument();
+    expect(container.querySelector(".flappy-bird-track .flappy-bird-sprite")).toBeInTheDocument();
+  });
+
   it("queues quick Snake turns so mobile swipes do not feel dropped", () => {
     const queued = queueSnakeTurn(queueSnakeTurn(createSnakeRun(0, "playing"), "up"), "left");
 
@@ -728,8 +758,7 @@ describe("GameRoomView", () => {
     expect(screen.getByRole("img", { name: "Sunk Patrol Boat" })).toBeInTheDocument();
   });
 
-  it("shows rules, move history, and undo requests", () => {
-    const onRequestUndo = vi.fn();
+  it("shows rules and move history without live undo controls", () => {
     render(
       <GameRoomView
         room={{
@@ -750,7 +779,7 @@ describe("GameRoomView", () => {
         onChat={vi.fn()}
         onReaction={vi.fn()}
         onRematch={vi.fn()}
-        onRequestUndo={onRequestUndo}
+        onRequestUndo={vi.fn()}
         onClaimSeat={vi.fn()}
         onSwitchGame={vi.fn()}
         onSetBoardVariant={vi.fn()}
@@ -760,9 +789,8 @@ describe("GameRoomView", () => {
 
     expect(screen.getByText("Connect four pieces horizontally, vertically, or diagonally.")).toBeInTheDocument();
     expect(screen.getByText("Column 1")).toBeInTheDocument();
-    expect(screen.getByText("Undo requested 1/2")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Request undo" }));
-    expect(onRequestUndo).toHaveBeenCalled();
+    expect(screen.queryByText("Undo requested 1/2")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request undo" })).not.toBeInTheDocument();
   });
 
   it("shows game-over celebration and rematch vote count", () => {

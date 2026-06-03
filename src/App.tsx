@@ -8,6 +8,7 @@ import { Lobby } from "./ui/Lobby";
 const TOKEN_KEY = "table-sparks-guest-token";
 const NAME_KEY = "table-sparks-guest-name";
 const ARCADE_DEBUG_KEY = "table-sparks-arcade-debug";
+const RECONNECT_STATUS = "Connection lost. Reconnecting...";
 const DEPLOYED_WORKER_ORIGIN = "https://table-sparks.neil27.workers.dev";
 const API_ORIGIN = resolveApiOrigin(window.location.hostname, import.meta.env.VITE_API_ORIGIN);
 
@@ -23,7 +24,7 @@ export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
 export function App() {
   const [path, setPath] = useState(window.location.pathname);
   const [creatingGameId, setCreatingGameId] = useState<GameId | null>(null);
-  const [guestName, setGuestName] = useState(() => localStorage.getItem(NAME_KEY) ?? "");
+  const [guestName, setGuestName] = useState(() => readLocalStorage(NAME_KEY) ?? "");
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -82,7 +83,7 @@ export function App() {
         roomId={roomMatch[1]}
         guestName={guestName}
         onSetGuestName={(name) => {
-          localStorage.setItem(NAME_KEY, name);
+          writeLocalStorage(NAME_KEY, name);
           setGuestName(name);
         }}
         onHome={() => navigate("/")}
@@ -156,6 +157,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
   const [lastMove, setLastMove] = useState<AppliedMove | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const errorTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   const showError = useCallback((message: string) => {
     setError(message);
@@ -171,38 +173,69 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
 
   useEffect(() => {
     let intentionallyClosed = false;
-    const socket = new WebSocket(socketUrl(roomId));
-    socketRef.current = socket;
+    let reconnectAttempt = 0;
 
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ type: "join", guestToken, name: guestName }));
-    });
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    };
 
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data)) as ServerMessage;
-      if ("room" in message && message.room) {
-        setRoom(message.room);
+    const connect = () => {
+      if (intentionallyClosed) return;
+      clearReconnectTimer();
+
+      const socket = new WebSocket(socketUrl(roomId));
+      socketRef.current = socket;
+
+      socket.addEventListener("open", () => {
+        reconnectAttempt = 0;
         setError(null);
-      }
-      if (message.type === "move_applied") setLastMove(message.move);
-      if (message.type === "error") showError(message.reason);
-    });
+        socket.send(JSON.stringify({ type: "join", guestToken, name: guestName }));
+      });
 
-    socket.addEventListener("close", () => {
-      if (intentionallyClosed) return;
-      showError("Connection closed. Refresh to rejoin the table.");
-    });
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(String(event.data)) as ServerMessage;
+        if ("room" in message && message.room) {
+          setRoom(message.room);
+          setError(null);
+        }
+        if (message.type === "move_applied") setLastMove(message.move);
+        if (message.type === "error") showError(message.reason);
+      });
 
-    socket.addEventListener("error", () => {
-      if (intentionallyClosed) return;
-      showError("The realtime connection tripped. Refresh to reconnect.");
-    });
+      socket.addEventListener("close", () => {
+        if (intentionallyClosed) return;
+        if (socketRef.current === socket) socketRef.current = null;
+        setError(RECONNECT_STATUS);
+        const delay = reconnectDelayForAttempt(reconnectAttempt);
+        reconnectAttempt += 1;
+        reconnectTimerRef.current = window.setTimeout(connect, delay);
+      });
+
+      socket.addEventListener("error", () => {
+        if (intentionallyClosed) return;
+        setError(RECONNECT_STATUS);
+      });
+    };
+
+    const reconnectIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const socket = socketRef.current;
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      reconnectAttempt = 0;
+      connect();
+    };
+
+    connect();
+    document.addEventListener("visibilitychange", reconnectIfVisible);
 
     return () => {
       intentionallyClosed = true;
       if (errorTimerRef.current) window.clearTimeout(errorTimerRef.current);
-      socket.close();
-      if (socketRef.current === socket) socketRef.current = null;
+      clearReconnectTimer();
+      document.removeEventListener("visibilitychange", reconnectIfVisible);
+      socketRef.current?.close();
+      socketRef.current = null;
     };
   }, [guestName, guestToken, roomId, showError]);
 
@@ -246,11 +279,11 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
 }
 
 function getGuestToken(): string {
-  const existing = localStorage.getItem(TOKEN_KEY);
+  const existing = readLocalStorage(TOKEN_KEY);
   if (existing) return existing;
 
   const token = crypto.randomUUID();
-  localStorage.setItem(TOKEN_KEY, token);
+  writeLocalStorage(TOKEN_KEY, token);
   return token;
 }
 
@@ -270,13 +303,41 @@ export function syncArcadeDebugFlagFromUrl(): void {
   const params = new URLSearchParams(window.location.search);
   const debug = params.get("debug")?.toLowerCase();
   if (params.get("arcadeDebug") === "1" || debug === "arcade" || debug === "1") {
-    localStorage.setItem(ARCADE_DEBUG_KEY, "1");
+    writeLocalStorage(ARCADE_DEBUG_KEY, "1");
   }
   if (params.get("arcadeDebug") === "0" || debug === "0" || debug === "off") {
-    localStorage.removeItem(ARCADE_DEBUG_KEY);
+    removeLocalStorage(ARCADE_DEBUG_KEY);
   }
+}
+
+export function reconnectDelayForAttempt(attempt: number): number {
+  return Math.min(4000, 350 * 2 ** Math.max(0, attempt));
 }
 
 function apiUrl(path: string): string {
   return `${API_ORIGIN}${path}`;
+}
+
+function readLocalStorage(key: string): string | null {
+  try {
+    return typeof localStorage.getItem === "function" ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  try {
+    if (typeof localStorage.setItem === "function") localStorage.setItem(key, value);
+  } catch {
+    // Guest identity/debug flags are convenience state; gameplay should keep running without storage.
+  }
+}
+
+function removeLocalStorage(key: string): void {
+  try {
+    if (typeof localStorage.removeItem === "function") localStorage.removeItem(key);
+  } catch {
+    // Storage may be restricted in private/fresh browser contexts.
+  }
 }

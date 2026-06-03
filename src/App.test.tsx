@@ -1,5 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { resolveApiOrigin, syncArcadeDebugFlagFromUrl } from "./App";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { reconnectDelayForAttempt, resolveApiOrigin, syncArcadeDebugFlagFromUrl } from "./App";
+
+beforeEach(() => {
+  const storage = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    removeItem: (key: string) => {
+      storage.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      storage.set(key, value);
+    }
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("resolveApiOrigin", () => {
   it("uses the deployed Worker API when the app is served from Cloudflare Pages", () => {
@@ -31,5 +48,13 @@ describe("syncArcadeDebugFlagFromUrl", () => {
 
     expect(localStorage.getItem("table-sparks-arcade-debug")).toBeNull();
     window.history.pushState({}, "", "/");
+  });
+});
+
+describe("reconnectDelayForAttempt", () => {
+  it("backs off reconnect attempts without requiring a manual refresh", () => {
+    expect(reconnectDelayForAttempt(0)).toBe(350);
+    expect(reconnectDelayForAttempt(1)).toBe(700);
+    expect(reconnectDelayForAttempt(8)).toBe(4000);
   });
 });
