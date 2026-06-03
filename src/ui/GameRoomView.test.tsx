@@ -70,6 +70,7 @@ describe("GameRoomView", () => {
       <GameRoomView
         room={room}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -115,6 +116,7 @@ describe("GameRoomView", () => {
       <GameRoomView
         room={spectatorRoom}
         guestToken="watch-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -139,6 +141,7 @@ describe("GameRoomView", () => {
       <GameRoomView
         room={{ ...spectatorRoom, winner: "p1" }}
         guestToken="watch-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -166,6 +169,7 @@ describe("GameRoomView", () => {
       <GameRoomView
         room={{ ...room, turn: "p2" }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -185,6 +189,61 @@ describe("GameRoomView", () => {
     expect(onMove).not.toHaveBeenCalled();
   });
 
+  it("shows reconnecting as a quiet status chip", () => {
+    render(
+      <GameRoomView
+        room={room}
+        guestToken="red-token"
+        connectionStatus="reconnecting"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Reconnecting...")).toHaveClass("connection-reconnecting");
+  });
+
+  it("shows when a friend opponent is briefly reconnecting", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          players: [
+            room.players[0],
+            { ...room.players[1], connected: false }
+          ]
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Opponent reconnecting")).toBeInTheDocument();
+    expect(screen.getByText("reconnecting")).toBeInTheDocument();
+  });
+
   it("shows bot mode controls for bot rooms", () => {
     const onSetBotDifficulty = vi.fn();
     render(
@@ -198,6 +257,7 @@ describe("GameRoomView", () => {
           ]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -227,6 +287,7 @@ describe("GameRoomView", () => {
           board: Array.from({ length: 3 }, () => Array.from<Cell>({ length: 3 }).fill(null))
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -244,6 +305,49 @@ describe("GameRoomView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "5x5 board" }));
     expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
+  });
+
+  it("locks game and board settings after the first move", () => {
+    const onSetBoardVariant = vi.fn();
+    const onSwitchGame = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "tic-tac-toe",
+          board: [
+            ["p1", null, null],
+            [null, null, null],
+            [null, null, null]
+          ],
+          moveCount: 1
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={onSwitchGame}
+        onSetBoardVariant={onSetBoardVariant}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const wideButton = screen.getByRole("button", { name: "5x5 board" });
+    expect(wideButton).toBeDisabled();
+    fireEvent.click(wideButton);
+    expect(onSetBoardVariant).not.toHaveBeenCalled();
+
+    const gomokuRailButton = screen.getByRole("button", { name: "Gomoku" });
+    expect(gomokuRailButton).toBeDisabled();
+    fireEvent.click(gomokuRailButton);
+    expect(onSwitchGame).not.toHaveBeenCalled();
   });
 
   it("marks the most recent Tic Tac Toe move so it can animate without resizing the grid", () => {
@@ -266,6 +370,7 @@ describe("GameRoomView", () => {
           ]
         }}
         guestToken="yellow-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         lastMove={lastMove}
@@ -296,6 +401,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -327,6 +433,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -355,6 +462,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -405,6 +513,7 @@ describe("GameRoomView", () => {
           }
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -443,6 +552,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -482,6 +592,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -504,46 +615,6 @@ describe("GameRoomView", () => {
     expect(allowed).toBe(false);
   });
 
-  it("shows arcade debug details from the room URL", () => {
-    window.history.pushState({}, "", "/room/room-test?arcadeDebug=1");
-
-    try {
-      render(
-        <GameRoomView
-          room={{
-            ...room,
-            gameId: "flappy-bird",
-            opponent: "bot",
-            players: [room.players[0]],
-            board: [[null]]
-          }}
-          guestToken="red-token"
-          inviteUrl="https://table-sparks.test/room/room-test"
-          copiedInvite={false}
-          onCopyInvite={vi.fn()}
-          onMove={vi.fn()}
-          onChat={vi.fn()}
-          onReaction={vi.fn()}
-          onRematch={vi.fn()}
-          onRequestUndo={vi.fn()}
-          onClaimSeat={vi.fn()}
-          onSwitchGame={vi.fn()}
-          onSetBoardVariant={vi.fn()}
-          onSetBotDifficulty={vi.fn()}
-        />
-      );
-
-      const debug = screen.getByLabelText("Flappy Bird debug");
-      expect(debug).toHaveTextContent("Arcade debug");
-      expect(debug).toHaveTextContent("bundle");
-      fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-      fireEvent.pointerDown(screen.getByRole("application", { name: "Flappy Bird" }));
-      expect(debug).toHaveTextContent("pointer/pointerdown");
-    } finally {
-      window.history.pushState({}, "", "/");
-    }
-  });
-
   it("installs a non-passive document touch listener for mobile Flappy taps", () => {
     const addEventListener = vi.spyOn(document, "addEventListener");
 
@@ -557,6 +628,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -598,6 +670,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -651,6 +724,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -693,6 +767,7 @@ describe("GameRoomView", () => {
           board: [[null]]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -740,6 +815,7 @@ describe("GameRoomView", () => {
           }
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -798,6 +874,7 @@ describe("GameRoomView", () => {
           }
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -830,6 +907,7 @@ describe("GameRoomView", () => {
           undoRequests: ["red-token"]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -860,6 +938,7 @@ describe("GameRoomView", () => {
           rematchRequests: ["red-token"]
         }}
         guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -894,6 +973,7 @@ describe("GameRoomView", () => {
           ]
         }}
         guestToken="watch-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}

@@ -40,7 +40,7 @@ describe("GameRoom Durable Object", () => {
   it("creates private invite rooms with the requested game", async () => {
     const response = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
-      body: JSON.stringify({ gameId: "gomoku" }),
+      body: JSON.stringify({ gameId: "tic-tac-toe", boardVariant: "wide" }),
       headers: { "content-type": "application/json" }
     });
 
@@ -48,10 +48,12 @@ describe("GameRoom Durable Object", () => {
   const json = (await response.json()) as {
     roomId: string;
     gameId: string;
+    boardVariant: string;
     invitePath: string;
   };
 
-    expect(json.gameId).toBe("gomoku");
+    expect(json.gameId).toBe("tic-tac-toe");
+    expect(json.boardVariant).toBe("wide");
     expect(json.roomId).toMatch(/^room-/);
     expect(json.invitePath).toBe(`/room/${json.roomId}`);
   });
@@ -189,6 +191,36 @@ describe("GameRoom Durable Object", () => {
     expect(resized.room?.boardVariant).toBe("wide");
     expect(resized.room?.board).toHaveLength(5);
     expect(resized.room?.board[0]).toHaveLength(5);
+  });
+
+  it("lets only the host change room settings before the first move", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const host = await openRoomSocket(roomId);
+    const guest = await openRoomSocket(roomId);
+    host.send(JSON.stringify({ type: "join", guestToken: "token-host", name: "Hana" }));
+    await waitForType(host, "room_snapshot");
+    guest.send(JSON.stringify({ type: "join", guestToken: "token-guest", name: "Gus" }));
+    await waitForType(guest, "room_snapshot");
+
+    guest.send(JSON.stringify({ type: "set_board_variant", variant: "wide" }));
+    const blockedGuest = await waitForType(guest, "error");
+    expect(blockedGuest.reason).toBe("Only the host can change the board before the first move.");
+
+    host.send(JSON.stringify({ type: "set_board_variant", variant: "wide" }));
+    const resized = await waitForType(guest, "room_snapshot");
+    expect(resized.room?.boardVariant).toBe("wide");
+
+    host.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    await waitForType(guest, "move_applied");
+    host.send(JSON.stringify({ type: "set_board_variant", variant: "party" }));
+    const blockedAfterMove = await waitForType(host, "error");
+    expect(blockedAfterMove.reason).toBe("Only the host can change the board before the first move.");
   });
 
   it("tracks move history and requires both friend players for undo", async () => {

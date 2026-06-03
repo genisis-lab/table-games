@@ -1,4 +1,12 @@
-import { isBotDifficulty, isGameId, supportsFriendMode, type BotDifficulty, type GameId } from "../src/shared/games";
+import {
+  isBoardVariantForGame,
+  isBotDifficulty,
+  isGameId,
+  supportsFriendMode,
+  type BoardVariant,
+  type BotDifficulty,
+  type GameId
+} from "../src/shared/games";
 import { GameRoom, type Env } from "./game-room";
 
 export { GameRoom };
@@ -21,6 +29,7 @@ export default {
           gameId?: string;
           opponent?: string;
           botDifficulty?: string;
+          boardVariant?: string;
         };
         if (!body.gameId || !isGameId(body.gameId)) {
           return json({ error: "Unknown game." }, 400);
@@ -32,13 +41,16 @@ export default {
         const botDifficulty = body.botDifficulty && isBotDifficulty(body.botDifficulty)
           ? body.botDifficulty
           : "ruthless";
+        const boardVariant = body.boardVariant && isBoardVariantForGame(body.gameId, body.boardVariant)
+          ? body.boardVariant
+          : undefined;
 
         const roomId = createRoomId();
         const stub = env.ROOMS.getByName(roomId);
         await stub.fetch(
           new Request(`https://room.internal/${roomId}/init`, {
             method: "POST",
-            body: JSON.stringify({ gameId: body.gameId, opponent, botDifficulty }),
+            body: JSON.stringify({ gameId: body.gameId, opponent, botDifficulty, boardVariant }),
             headers: { "content-type": "application/json" }
           })
         );
@@ -49,6 +61,7 @@ export default {
             gameId: body.gameId,
             opponent,
             botDifficulty,
+            boardVariant,
             invitePath: `/room/${roomId}`
           },
           201
@@ -105,11 +118,12 @@ function createRoomId(): string {
 export function createRoomRequest(
   gameId: GameId,
   opponent: "friend" | "bot" = "friend",
-  botDifficulty: BotDifficulty = "ruthless"
+  botDifficulty: BotDifficulty = "ruthless",
+  boardVariant?: BoardVariant
 ): Request {
   return new Request("https://table-sparks.test/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ gameId, opponent, botDifficulty }),
+    body: JSON.stringify({ gameId, opponent, botDifficulty, boardVariant }),
     headers: { "content-type": "application/json" }
   });
 }

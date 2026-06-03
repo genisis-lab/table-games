@@ -7,10 +7,16 @@ import { Lobby } from "./ui/Lobby";
 
 const TOKEN_KEY = "table-sparks-guest-token";
 const NAME_KEY = "table-sparks-guest-name";
-const ARCADE_DEBUG_KEY = "table-sparks-arcade-debug";
-const RECONNECT_STATUS = "Connection lost. Reconnecting...";
 const DEPLOYED_WORKER_ORIGIN = "https://table-sparks.neil27.workers.dev";
 const API_ORIGIN = resolveApiOrigin(window.location.hostname, import.meta.env.VITE_API_ORIGIN);
+
+export type ConnectionStatus = "connecting" | "connected" | "reconnecting";
+
+export interface CreateRoomOptions {
+  opponent: "friend" | "bot";
+  botDifficulty: BotDifficulty;
+  boardVariant?: BoardVariant;
+}
 
 export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
   const cleanEnvOrigin = envOrigin?.replace(/\/$/, "") ?? "";
@@ -32,10 +38,6 @@ export function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  useEffect(() => {
-    syncArcadeDebugFlagFromUrl();
-  }, [path]);
-
   const navigate = useCallback((nextPath: string) => {
     window.history.pushState({}, "", nextPath);
     setPath(nextPath);
@@ -44,7 +46,7 @@ export function App() {
   const createRoom = useCallback(
     async (
       gameId: GameId,
-      options: { opponent: "friend" | "bot"; botDifficulty: BotDifficulty } = {
+      options: CreateRoomOptions = {
         opponent: "friend",
         botDifficulty: "ruthless"
       }
@@ -153,6 +155,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
   const guestToken = useMemo(getGuestToken, []);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [lastMove, setLastMove] = useState<AppliedMove | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -183,12 +186,14 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
     const connect = () => {
       if (intentionallyClosed) return;
       clearReconnectTimer();
+      setConnectionStatus((current) => current === "connected" ? "reconnecting" : "connecting");
 
       const socket = new WebSocket(socketUrl(roomId));
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
         reconnectAttempt = 0;
+        setConnectionStatus("connected");
         setError(null);
         socket.send(JSON.stringify({ type: "join", guestToken, name: guestName }));
       });
@@ -197,7 +202,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         const message = JSON.parse(String(event.data)) as ServerMessage;
         if ("room" in message && message.room) {
           setRoom(message.room);
-          setError(null);
+          setConnectionStatus("connected");
         }
         if (message.type === "move_applied") setLastMove(message.move);
         if (message.type === "error") showError(message.reason);
@@ -206,7 +211,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
       socket.addEventListener("close", () => {
         if (intentionallyClosed) return;
         if (socketRef.current === socket) socketRef.current = null;
-        setError(RECONNECT_STATUS);
+        setConnectionStatus("reconnecting");
         const delay = reconnectDelayForAttempt(reconnectAttempt);
         reconnectAttempt += 1;
         reconnectTimerRef.current = window.setTimeout(connect, delay);
@@ -214,7 +219,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
 
       socket.addEventListener("error", () => {
         if (intentionallyClosed) return;
-        setError(RECONNECT_STATUS);
+        setConnectionStatus("reconnecting");
       });
     };
 
@@ -256,6 +261,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
       <GameRoomView
         room={room}
         guestToken={guestToken}
+        connectionStatus={connectionStatus}
         inviteUrl={inviteUrl}
         copiedInvite={copiedInvite}
         lastMove={lastMove}
@@ -299,17 +305,6 @@ function socketUrl(roomId: string): string {
   return `${protocol}//${window.location.host}/api/rooms/${roomId}/socket`;
 }
 
-export function syncArcadeDebugFlagFromUrl(): void {
-  const params = new URLSearchParams(window.location.search);
-  const debug = params.get("debug")?.toLowerCase();
-  if (params.get("arcadeDebug") === "1" || debug === "arcade" || debug === "1") {
-    writeLocalStorage(ARCADE_DEBUG_KEY, "1");
-  }
-  if (params.get("arcadeDebug") === "0" || debug === "0" || debug === "off") {
-    removeLocalStorage(ARCADE_DEBUG_KEY);
-  }
-}
-
 export function reconnectDelayForAttempt(attempt: number): number {
   return Math.min(4000, 350 * 2 ** Math.max(0, attempt));
 }
@@ -331,13 +326,5 @@ function writeLocalStorage(key: string, value: string): void {
     if (typeof localStorage.setItem === "function") localStorage.setItem(key, value);
   } catch {
     // Guest identity/debug flags are convenience state; gameplay should keep running without storage.
-  }
-}
-
-function removeLocalStorage(key: string): void {
-  try {
-    if (typeof localStorage.removeItem === "function") localStorage.removeItem(key);
-  } catch {
-    // Storage may be restricted in private/fresh browser contexts.
   }
 }

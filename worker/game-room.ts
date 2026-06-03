@@ -472,8 +472,14 @@ export class GameRoom extends DurableObject<Env> {
     guestToken: string | undefined,
     gameId: GameId
   ): Promise<void> {
-    if (!this.findPlayer(room, guestToken)) {
+    const player = this.findPlayer(room, guestToken);
+    if (!player) {
       this.send(ws, { type: "error", reason: "Only seated players can switch games." });
+      return;
+    }
+
+    if (!canChangeRoomSettings(room, player)) {
+      this.send(ws, { type: "error", reason: "Only the host can change games before the first move." });
       return;
     }
 
@@ -501,8 +507,14 @@ export class GameRoom extends DurableObject<Env> {
     guestToken: string | undefined,
     variant: BoardVariant
   ): Promise<void> {
-    if (!this.findPlayer(room, guestToken)) {
+    const player = this.findPlayer(room, guestToken);
+    if (!player) {
       this.send(ws, { type: "error", reason: "Only seated players can resize the board." });
+      return;
+    }
+
+    if (!canChangeRoomSettings(room, player)) {
+      this.send(ws, { type: "error", reason: "Only the host can change the board before the first move." });
       return;
     }
 
@@ -523,8 +535,14 @@ export class GameRoom extends DurableObject<Env> {
     guestToken: string | undefined,
     difficulty: BotDifficulty
   ): Promise<void> {
-    if (!this.findPlayer(room, guestToken)) {
+    const player = this.findPlayer(room, guestToken);
+    if (!player) {
       this.send(ws, { type: "error", reason: "Only seated players can adjust the bot." });
+      return;
+    }
+
+    if (!canChangeRoomSettings(room, player)) {
+      this.send(ws, { type: "error", reason: "Only the host can change bot mode before the first move." });
       return;
     }
 
@@ -810,6 +828,10 @@ function addUnique(values: string[], value: string | undefined): void {
 function hasAllHumanPlayerVotes(room: StoredRoom, votes: string[]): boolean {
   const humans = room.players.filter((player) => !player.isBot && player.connected);
   return humans.length > 0 && humans.every((player) => votes.includes(player.guestToken));
+}
+
+function canChangeRoomSettings(room: StoredRoom, player: RoomPlayer): boolean {
+  return player.mark === "p1" && room.game.moveCount === 0;
 }
 
 function cloneGameState(game: GameState): GameState {
