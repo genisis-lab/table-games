@@ -81,7 +81,8 @@ export interface MorrisMeta {
   removed: Record<PlayerMark, number>;
 }
 
-export type LastCardColor = "red" | "yellow" | "green" | "blue";
+export type LastCardColor = "red" | "yellow" | "green" | "blue" | "wild";
+type LastCardActiveColor = Exclude<LastCardColor, "wild">;
 export type LastCardRank =
   | "0"
   | "1"
@@ -95,7 +96,9 @@ export type LastCardRank =
   | "9"
   | "skip"
   | "reverse"
-  | "draw2";
+  | "draw2"
+  | "wild"
+  | "wild4";
 
 export interface LastCardCard {
   id: string;
@@ -109,7 +112,7 @@ export interface LastCardMeta {
   discard: LastCardCard[];
   hands: Record<PlayerMark, LastCardCard[]>;
   handCounts: Record<PlayerMark, number>;
-  currentColor: LastCardColor;
+  currentColor: LastCardActiveColor;
   lastDraw?: { player: PlayerMark; count: number };
   lastAction?: LastCardRank;
 }
@@ -269,12 +272,12 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
   },
   "last-card": {
     id: "last-card",
-    name: "Last Card",
+    name: "Uno",
     rows: 1,
     columns: 1,
     connectLength: 0,
     moveMode: "custom",
-    playerNames: { p1: "Warm Deck", p2: "Cool Deck" },
+    playerNames: { p1: "Player 1", p2: "Player 2" },
     supportsFriend: true
   },
   "flappy-bird": {
@@ -386,9 +389,10 @@ const MORRIS_NEIGHBORS: Record<string, string[]> = {
   "6,0": ["3,0", "6,3"], "6,3": ["5,3", "6,0", "6,6"], "6,6": ["3,6", "6,3"]
 };
 
-const LAST_CARD_COLORS: LastCardColor[] = ["red", "yellow", "green", "blue"];
+const LAST_CARD_COLORS: LastCardActiveColor[] = ["red", "yellow", "green", "blue"];
 const LAST_CARD_NUMBER_RANKS: LastCardRank[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const LAST_CARD_ACTION_RANKS: LastCardRank[] = ["skip", "reverse", "draw2"];
+const LAST_CARD_WILD_RANKS: LastCardRank[] = ["wild", "wild4"];
 const LAST_CARD_DRAW_MOVE = -1;
 const LAST_CARD_HAND_SIZE = 7;
 
@@ -550,6 +554,10 @@ export function chooseBotMove(
   const opponent = otherPlayer(player);
   const blockingMove = findImmediateWinningMove({ ...state, turn: opponent }, opponent, legalMoves);
   if (blockingMove && state.gameId !== "battleship") return blockingMove;
+
+  if (state.gameId === "four-in-a-row") {
+    return chooseFourInARowMove({ ...state, turn: player }, player, legalMoves, difficulty);
+  }
 
   if (state.gameId === "dots-and-boxes") {
     return chooseDotsMove({ ...state, turn: player }, legalMoves, difficulty);
@@ -1001,7 +1009,7 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
 
   hand.splice(move.column, 1);
   meta.discard.push(card);
-  meta.currentColor = card.color;
+  meta.currentColor = card.color === "wild" ? chooseLastCardColor(meta.hands[player]) : card.color;
   meta.lastAction = card.rank;
   delete meta.lastDraw;
 
@@ -1009,6 +1017,10 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
   let nextTurn = opponent;
   if (card.rank === "draw2") {
     const drawn = drawLastCards(meta, opponent, 2);
+    meta.lastDraw = { player: opponent, count: drawn };
+    nextTurn = player;
+  } else if (card.rank === "wild4") {
+    const drawn = drawLastCards(meta, opponent, 4);
     meta.lastDraw = { player: opponent, count: drawn };
     nextTurn = player;
   } else if (card.rank === "skip" || card.rank === "reverse") {
@@ -1340,6 +1352,189 @@ function findImmediateWinningMove(state: GameState, player: PlayerMark, legalMov
   return null;
 }
 
+function chooseFourInARowMove(
+  state: GameState,
+  player: PlayerMark,
+  legalMoves: GameMove[],
+  difficulty: BotDifficulty
+): GameMove {
+  if (state.moveCount === 0) {
+    return legalMoves.find((move) => move.column === Math.floor(state.board[0].length / 2)) ?? orderedFourMoves(state, legalMoves)[0];
+  }
+  if (difficulty === "casual") return chooseBySearch(state, player, legalMoves, 2);
+  if (difficulty === "sharp") return chooseFourInARowBySearch(state, player, legalMoves, 5);
+
+  const depth = state.moveCount < 8 ? 8 : state.moveCount < 20 ? 9 : 10;
+  return chooseFourInARowBySearch(state, player, legalMoves, depth);
+}
+
+function chooseFourInARowBySearch(
+  state: GameState,
+  player: PlayerMark,
+  legalMoves: GameMove[],
+  depth: number
+): GameMove {
+  const table = new Map<string, { depth: number; score: number }>();
+  return orderedFourMoves(state, legalMoves)
+    .map((move) => {
+      const result = applyGameMove(state, player, move);
+      return {
+        move,
+        score: result.ok
+          ? fourInARowMinimax(result.state, player, depth - 1, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, table) +
+            fourColumnBias(state, move)
+          : Number.NEGATIVE_INFINITY
+      };
+    })
+    .sort((a, b) => b.score - a.score)[0].move;
+}
+
+function fourInARowMinimax(
+  state: GameState,
+  bot: PlayerMark,
+  depth: number,
+  alpha: number,
+  beta: number,
+  table: Map<string, { depth: number; score: number }>
+): number {
+  if (state.winner || depth === 0) return fourInARowScore(state, bot);
+
+  const key = fourInARowCacheKey(state);
+  const cached = table.get(key);
+  if (cached && cached.depth >= depth) return cached.score;
+
+  const legalMoves = getLegalMoves(state);
+  if (legalMoves.length === 0) return fourInARowScore(state, bot);
+
+  const maximizing = state.turn === bot;
+  let exact = true;
+  let best = maximizing ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+
+  for (const move of orderedFourMoves(state, legalMoves)) {
+    const result = applyGameMove(state, state.turn, move);
+    if (!result.ok) continue;
+    const score = fourInARowMinimax(result.state, bot, depth - 1, alpha, beta, table);
+    if (maximizing) {
+      best = Math.max(best, score);
+      alpha = Math.max(alpha, best);
+    } else {
+      best = Math.min(best, score);
+      beta = Math.min(beta, best);
+    }
+    if (beta <= alpha) {
+      exact = false;
+      break;
+    }
+  }
+
+  if (exact) table.set(key, { depth, score: best });
+  return best;
+}
+
+function fourInARowScore(state: GameState, bot: PlayerMark): number {
+  const opponent = otherPlayer(bot);
+  if (state.winner === bot) return 12_000_000 + (1000 - state.moveCount);
+  if (state.winner === opponent) return -12_000_000 - (1000 - state.moveCount);
+  if (state.winner === "draw") return 0;
+
+  const botThreats = countFourWinningDrops(state, bot);
+  const opponentThreats = countFourWinningDrops(state, opponent);
+  const threatScore =
+    (botThreats > 1 ? 420_000 : botThreats * 120_000) -
+    (opponentThreats > 1 ? 520_000 : opponentThreats * 145_000);
+
+  return (
+    threatScore +
+    fourWindowScore(state, bot) -
+    fourWindowScore(state, opponent) * 1.18 +
+    centerColumnScore(state, bot) -
+    centerColumnScore(state, opponent) * 1.04 +
+    pieceScore(state, bot) -
+    pieceScore(state, opponent)
+  );
+}
+
+function fourWindowScore(state: GameState, player: PlayerMark): number {
+  const opponent = otherPlayer(player);
+  let score = 0;
+  for (let row = 0; row < state.board.length; row += 1) {
+    for (let column = 0; column < state.board[0].length; column += 1) {
+      for (const direction of DIRECTIONS) {
+        const points = Array.from({ length: 4 }, (_, index) => ({
+          row: row + direction.row * index,
+          column: column + direction.column * index
+        }));
+        if (points.some((point) => cellAt(state.board, point) === undefined)) continue;
+        score += fourWindowPoints(state.board, points, player, opponent);
+      }
+    }
+  }
+  return score;
+}
+
+function fourWindowPoints(board: Cell[][], points: BoardPoint[], player: PlayerMark, opponent: PlayerMark): number {
+  const cells = points.map((point) => cellAt(board, point));
+  const own = cells.filter((cell) => cell === player).length;
+  const against = cells.filter((cell) => cell === opponent).length;
+  const emptyPoints = points.filter((point) => cellAt(board, point) === null);
+  if (own > 0 && against > 0) return 0;
+  if (own === 4) return 900_000;
+  if (own === 3 && emptyPoints.length === 1) return isFourPlayablePoint(board, emptyPoints[0]) ? 96_000 : 38_000;
+  if (own === 2 && emptyPoints.length === 2) {
+    return emptyPoints.some((point) => isFourPlayablePoint(board, point)) ? 4_200 : 1_600;
+  }
+  if (own === 1 && emptyPoints.length === 3) return 180;
+  return 0;
+}
+
+function countFourWinningDrops(state: GameState, player: PlayerMark): number {
+  let count = 0;
+  for (let column = 0; column < state.board[0].length; column += 1) {
+    const row = fourDropRow(state.board, column);
+    if (row === null) continue;
+    state.board[row][column] = player;
+    if (findWinningLine(state.board, { row, column }, player, 4).length > 0) count += 1;
+    state.board[row][column] = null;
+  }
+  return count;
+}
+
+function fourDropRow(board: Cell[][], column: number): number | null {
+  for (let row = board.length - 1; row >= 0; row -= 1) {
+    if (!board[row][column]) return row;
+  }
+  return null;
+}
+
+function isFourPlayablePoint(board: Cell[][], point: BoardPoint): boolean {
+  return cellAt(board, point) === null && (point.row === board.length - 1 || cellAt(board, { row: point.row + 1, column: point.column }) !== null);
+}
+
+function centerColumnScore(state: GameState, player: PlayerMark): number {
+  const center = Math.floor(state.board[0].length / 2);
+  let score = 0;
+  for (let row = 0; row < state.board.length; row += 1) {
+    for (let column = 0; column < state.board[0].length; column += 1) {
+      if (state.board[row][column] !== player) continue;
+      score += Math.max(0, 120 - Math.abs(column - center) * 32 - Math.abs(row - (state.board.length - 1)) * 3);
+    }
+  }
+  return score;
+}
+
+function orderedFourMoves(state: GameState, moves: GameMove[]): GameMove[] {
+  return [...moves].sort((a, b) => fourColumnBias(state, b) - fourColumnBias(state, a));
+}
+
+function fourColumnBias(state: GameState, move: GameMove): number {
+  const center = (state.board[0].length - 1) / 2;
+  return 100 - Math.abs(move.column - center) * 14;
+}
+
+function fourInARowCacheKey(state: GameState): string {
+  return `${state.turn}:${state.board.map((row) => row.map((cell) => cell === null ? "." : cell === "p1" ? "1" : "2").join("")).join("")}`;
+}
+
 function chooseBySearch(state: GameState, player: PlayerMark, legalMoves: GameMove[], depth: number): GameMove {
   return orderedMoves(state, legalMoves)
     .map((move) => {
@@ -1420,6 +1615,7 @@ function boardScore(state: GameState, bot: PlayerMark): number {
     const meta = state.meta?.lastCard;
     return meta ? (meta.handCounts[otherPlayer(bot)] - meta.handCounts[bot]) * 350 : 0;
   }
+  if (state.gameId === "four-in-a-row") return fourInARowScore(state, bot);
 
   const opponent = otherPlayer(bot);
   return (
@@ -1682,7 +1878,7 @@ function createLastCardMeta(): LastCardMeta {
     discard: [firstCard],
     hands,
     handCounts: { p1: hands.p1.length, p2: hands.p2.length },
-    currentColor: firstCard.color
+    currentColor: firstCard.color === "wild" ? "red" : firstCard.color
   };
   return syncLastCardHandCounts(meta);
 }
@@ -1700,6 +1896,10 @@ function makeLastCardDeck(): LastCardCard[] {
       deck.push({ id: `${color}-${rank}-b`, color, rank });
     }
   }
+  for (let index = 0; index < 4; index += 1) {
+    deck.push({ id: `wild-wild-${index}`, color: "wild", rank: LAST_CARD_WILD_RANKS[0] });
+    deck.push({ id: `wild-wild4-${index}`, color: "wild", rank: LAST_CARD_WILD_RANKS[1] });
+  }
   return deck;
 }
 
@@ -1716,8 +1916,8 @@ function lastCardTop(meta: LastCardMeta): LastCardCard | undefined {
   return meta.discard.at(-1);
 }
 
-function isLastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardColor): boolean {
-  return card.color === currentColor || card.rank === top.rank;
+function isLastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardActiveColor): boolean {
+  return card.color === "wild" || card.color === currentColor || card.rank === top.rank;
 }
 
 function getPlayableLastCardIndexes(meta: LastCardMeta, player: PlayerMark): number[] {
@@ -1773,29 +1973,50 @@ function lastCardMoveScore(
 
   const opponent = otherPlayer(player);
   const remainingHand = meta.hands[player].filter((_, index) => index !== move.column);
-  const sameColorLeft = remainingHand.filter((candidate) => candidate.color === card.color).length;
+  const sameColorLeft = card.color === "wild"
+    ? bestLastCardColorCount(remainingHand)
+    : remainingHand.filter((candidate) => candidate.color === card.color).length;
   const sameRankLeft = remainingHand.filter((candidate) => candidate.rank === card.rank).length;
   const opponentPressure = Math.max(0, 4 - meta.hands[opponent].length) * 18;
-  const actionScore = card.rank === "draw2"
-    ? 110 + opponentPressure
-    : card.rank === "skip" || card.rank === "reverse"
-      ? 72 + opponentPressure
-      : 0;
+  const actionScore = card.rank === "wild4"
+    ? 138 + opponentPressure
+    : card.rank === "draw2"
+      ? 110 + opponentPressure
+      : card.rank === "skip" || card.rank === "reverse"
+        ? 72 + opponentPressure
+        : card.rank === "wild"
+          ? 44
+          : 0;
 
   return (
     actionScore +
     sameColorLeft * (difficulty === "casual" ? 10 : 18) +
     sameRankLeft * 8 +
     lastCardRankScore(card.rank) +
-    (card.color === meta.currentColor ? 9 : 0) -
+    (card.color === meta.currentColor ? 9 : card.color === "wild" ? 13 : 0) -
     remainingHand.length * 2
   );
 }
 
 function lastCardRankScore(rank: LastCardRank): number {
+  if (rank === "wild4") return 32;
   if (rank === "draw2") return 24;
   if (rank === "skip" || rank === "reverse") return 18;
+  if (rank === "wild") return 16;
   return Number(rank);
+}
+
+function chooseLastCardColor(hand: LastCardCard[]): LastCardActiveColor {
+  return LAST_CARD_COLORS
+    .map((color) => ({
+      color,
+      count: hand.filter((card) => card.color === color).length
+    }))
+    .sort((a, b) => b.count - a.count)[0].color;
+}
+
+function bestLastCardColorCount(hand: LastCardCard[]): number {
+  return Math.max(0, ...LAST_CARD_COLORS.map((color) => hand.filter((card) => card.color === color).length));
 }
 
 export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {

@@ -1,7 +1,7 @@
 import { Bot, ChevronRight, Link2, MessageCircle, Search, Sparkles, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { BoardVariant, BotDifficulty, GameId } from "../shared/games";
-import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, supportsFriendMode } from "../shared/games";
+import { GAME_IDS, getGameDefinition, isSoloGame, supportsFriendMode } from "../shared/games";
 
 interface LobbyProps {
   onCreateRoom: (
@@ -12,16 +12,8 @@ interface LobbyProps {
 }
 
 type LibraryCategory = "All" | "Classic" | "Strategy" | "Arcade" | "Solo";
-type GameMode = "bot" | "friend" | "solo";
-
-interface GamePickerOptions {
-  mode: GameMode;
-  botDifficulty: BotDifficulty;
-  boardVariant?: BoardVariant;
-}
 
 const LIBRARY_CATEGORIES: LibraryCategory[] = ["All", "Classic", "Strategy", "Arcade", "Solo"];
-const BOT_DIFFICULTIES: BotDifficulty[] = ["casual", "sharp", "ruthless"];
 
 const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
   Classic: [
@@ -51,7 +43,6 @@ const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
 export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
   const [activeCategory, setActiveCategory] = useState<LibraryCategory>("All");
   const [query, setQuery] = useState("");
-  const [optionsByGame, setOptionsByGame] = useState<Partial<Record<GameId, GamePickerOptions>>>({});
 
   const visibleGameIds = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -65,26 +56,6 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
         .includes(needle);
     });
   }, [activeCategory, query]);
-
-  const updateOptions = (gameId: GameId, patch: Partial<GamePickerOptions>) => {
-    setOptionsByGame((current) => ({
-      ...current,
-      [gameId]: {
-        ...defaultOptionsFor(gameId),
-        ...current[gameId],
-        ...patch
-      }
-    }));
-  };
-
-  const startGame = (gameId: GameId) => {
-    const options = { ...defaultOptionsFor(gameId), ...optionsByGame[gameId] };
-    onCreateRoom(gameId, {
-      opponent: options.mode === "friend" ? "friend" : "bot",
-      botDifficulty: options.botDifficulty,
-      boardVariant: options.boardVariant
-    });
-  };
 
   return (
     <main className="lobby-shell">
@@ -147,14 +118,6 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
           <div className="game-stack">
             {visibleGameIds.map((gameId) => {
               const definition = getGameDefinition(gameId);
-              const option = { ...defaultOptionsFor(gameId), ...optionsByGame[gameId] };
-              const modes = modesFor(gameId);
-              const boardOptions = getBoardVariantOptions(gameId);
-              const startLabel = option.mode === "friend"
-                ? "Invite friend"
-                : option.mode === "solo"
-                  ? "Solo run"
-                  : "Play bot";
               return (
                 <article className={`game-poster ${gameId}`} aria-label={`${definition.name} game card`} key={gameId}>
                   <GamePreview gameId={gameId} />
@@ -167,66 +130,35 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
                     </div>
                     <p>{descriptionFor(gameId)}</p>
                   </div>
-                  <div className="poster-options">
-                    {modes.length > 1 ? (
-                      <div className="option-row" aria-label={`${definition.name} play mode`}>
-                        {modes.map((mode) => (
-                          <button
-                            className={option.mode === mode ? "option-chip active" : "option-chip"}
-                            type="button"
-                            aria-label={`${definition.name} ${modeLabel(mode)}`}
-                            onClick={() => updateOptions(gameId, { mode })}
-                            key={mode}
-                          >
-                            {modeLabel(mode)}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    {boardOptions.length > 1 ? (
-                      <div className="option-row" aria-label={`${definition.name} board size`}>
-                        {boardOptions.map((boardOption) => (
-                          <button
-                            className={option.boardVariant === boardOption.id ? "option-chip active" : "option-chip"}
-                            type="button"
-                            aria-label={`${definition.name} ${boardOption.label}`}
-                            title={boardOption.detail}
-                            onClick={() => updateOptions(gameId, { boardVariant: boardOption.id })}
-                            key={boardOption.id}
-                          >
-                            {boardOption.label}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    {option.mode === "bot" && !isSoloGame(gameId) ? (
-                      <div className="option-row" aria-label={`${definition.name} bot intelligence`}>
-                        {BOT_DIFFICULTIES.map((difficulty) => (
-                          <button
-                            className={option.botDifficulty === difficulty ? "option-chip active" : "option-chip"}
-                            type="button"
-                            aria-label={`${definition.name} ${difficulty} bot`}
-                            onClick={() => updateOptions(gameId, { botDifficulty: difficulty })}
-                            key={difficulty}
-                          >
-                            {difficultyLabel(difficulty)}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
                   <div className="poster-actions">
                     <button
                       className="primary-button"
                       type="button"
-                      onClick={() => startGame(gameId)}
+                      onClick={() => onCreateRoom(gameId, {
+                        opponent: "bot",
+                        botDifficulty: "ruthless"
+                      })}
                       disabled={creatingGameId === gameId}
-                      aria-label={`Start ${definition.name} ${option.mode === "friend" ? "friend room" : option.mode === "solo" ? "solo run" : "bot room"}`}
+                      aria-label={isSoloGame(gameId) ? `Play ${definition.name} solo` : `Play ${definition.name} against bot`}
                     >
-                      {option.mode === "friend" ? <UsersRound size={18} /> : <Bot size={18} />}
-                      {startLabel}
+                      <Bot size={18} />
+                      {isSoloGame(gameId) ? "Solo" : "Bot"}
                     </button>
-                    <ChevronRight className="poster-arrow" size={18} aria-hidden="true" />
+                    {supportsFriendMode(gameId) ? (
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => onCreateRoom(gameId, {
+                          opponent: "friend",
+                          botDifficulty: "ruthless"
+                        })}
+                        disabled={creatingGameId === gameId}
+                        aria-label={`Invite friend to ${definition.name}`}
+                      >
+                        Friend
+                        <ChevronRight size={18} />
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -238,37 +170,11 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
   );
 }
 
-function defaultOptionsFor(gameId: GameId): GamePickerOptions {
-  return {
-    mode: isSoloGame(gameId) ? "solo" : "bot",
-    botDifficulty: "ruthless",
-    boardVariant: getBoardVariantOptions(gameId)[0]?.id
-  };
-}
-
-function modesFor(gameId: GameId): GameMode[] {
-  if (isSoloGame(gameId)) return ["solo"];
-  if (supportsFriendMode(gameId)) return ["bot", "friend"];
-  return ["bot"];
-}
-
 function badgesFor(gameId: GameId): string[] {
   if (isSoloGame(gameId)) return ["Solo"];
   const badges = supportsFriendMode(gameId) ? ["1v1", "Bot supported"] : ["Bot supported"];
   if (gameId === "battleship") badges.unshift("Solo captain");
   return badges;
-}
-
-function modeLabel(mode: GameMode): string {
-  if (mode === "friend") return "Friend";
-  if (mode === "solo") return "Solo";
-  return "Bot";
-}
-
-function difficultyLabel(difficulty: BotDifficulty): string {
-  if (difficulty === "casual") return "Casual";
-  if (difficulty === "sharp") return "Sharp";
-  return "Ruthless";
 }
 
 function descriptionFor(gameId: GameId): string {
@@ -282,7 +188,7 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "battleship") return "Bot-only fleet hunting with splashy misses and nasty hits.";
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
-  if (gameId === "last-card") return "A color-matching card race with skip, reverse, and draw-two trouble.";
+  if (gameId === "last-card") return "Uno-style color matching with skips, reverses, wilds, and draw cards.";
   if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
   if (gameId === "snake") return "A fast little chase for food, clean turns, and just-one-more runs.";
   if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
@@ -382,7 +288,7 @@ function GamePreview({ gameId }: { gameId: GameId }) {
         <span className="card red">7</span>
         <span className="card yellow">S</span>
         <span className="card green">+2</span>
-        <span className="card blue">R</span>
+        <span className="card wild">+4</span>
       </div>
     );
   }

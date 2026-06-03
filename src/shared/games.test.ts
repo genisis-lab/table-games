@@ -325,12 +325,12 @@ describe("New game engines", () => {
     expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
-  it("deals Last Card hands and starts on a number discard", () => {
+  it("deals Uno hands and starts on a number discard", () => {
     const state = createGameState("last-card");
     const meta = state.meta?.lastCard;
 
     expect(getGameDefinition("last-card")).toMatchObject({
-      name: "Last Card",
+      name: "Uno",
       supportsFriend: true
     });
     expect(meta?.hands.p1).toHaveLength(7);
@@ -340,7 +340,7 @@ describe("New game engines", () => {
     expect(Number(meta?.discard[0].rank)).not.toBeNaN();
   });
 
-  it("plays Last Card matches by color or rank and updates hand counts", () => {
+  it("plays Uno matches by color or rank and updates hand counts", () => {
     const state = createGameState("last-card");
     state.meta!.lastCard = {
       deck: [],
@@ -364,7 +364,7 @@ describe("New game engines", () => {
     expect(next.turn).toBe("p2");
   });
 
-  it("applies Last Card draw-two as a skipped opponent turn", () => {
+  it("applies Uno draw-two as a skipped opponent turn", () => {
     const state = createGameState("last-card");
     state.meta!.lastCard = {
       deck: [
@@ -389,7 +389,37 @@ describe("New game engines", () => {
     expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 2 });
   });
 
-  it("chooses a sharp Last Card action card before a plain match", () => {
+  it("applies Uno wild draw-four and chooses the next table color", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [
+        { id: "blue-1-a", color: "blue", rank: "1" },
+        { id: "yellow-4-a", color: "yellow", rank: "4" },
+        { id: "red-3-a", color: "red", rank: "3" },
+        { id: "blue-8-a", color: "blue", rank: "8" }
+      ],
+      deckCount: 4,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [
+          { id: "wild-four-a", color: "wild", rank: "wild4" },
+          { id: "green-2-a", color: "green", rank: "2" }
+        ],
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }]
+      },
+      handCounts: { p1: 2, p2: 1 },
+      currentColor: "red"
+    };
+
+    const next = play(state, "p1", { column: 0 });
+
+    expect(next.turn).toBe("p1");
+    expect(next.meta?.lastCard?.currentColor).toBe("green");
+    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 5 });
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 4 });
+  });
+
+  it("chooses a sharp Uno action card before a plain match", () => {
     const state = createGameState("last-card");
     state.turn = "p2";
     state.meta!.lastCard = {
@@ -480,6 +510,10 @@ describe("Bot move selection", () => {
     state = play(state, "p1", { column: 2 });
 
     expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ column: 3 });
+  });
+
+  it("opens ruthless Four in a Row from the center column", () => {
+    expect(chooseBotMove(createGameState("four-in-a-row"), "p1", "ruthless")).toEqual({ column: 3 });
   });
 
   it("extends a Gomoku four-stone line into a win", () => {

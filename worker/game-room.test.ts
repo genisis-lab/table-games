@@ -126,7 +126,7 @@ describe("GameRoom Durable Object", () => {
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
   });
 
-  it("masks Last Card opponent hands and draw-pile order in room snapshots", async () => {
+  it("masks Uno opponent hands and draw-pile order in room snapshots", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({

@@ -914,7 +914,7 @@ function LastCardBoard({
   const canDraw = canMove && (deckCount > 0 || meta.discard.length > 1);
 
   return (
-    <div className="last-card-table" role="group" aria-label="Last Card table">
+    <div className="last-card-table" role="group" aria-label="Uno table">
       <div className="last-card-players" aria-label="Card counts">
         {(["p1", "p2"] as const).map((mark) => {
           const player = room.players.find((candidate) => candidate.mark === mark);
@@ -950,6 +950,8 @@ function LastCardBoard({
       <div className="last-card-event" aria-live="polite">
         {meta.lastDraw ? (
           <span>{definition.playerNames[meta.lastDraw.player]} drew {meta.lastDraw.count}</span>
+        ) : meta.lastAction && lastCardIsWildAction(meta.lastAction) ? (
+          <span>{lastCardRankLabel(meta.lastAction)} changed color to {lastCardColorName(meta.currentColor)}</span>
         ) : meta.lastAction && lastCardIsAction(meta.lastAction) ? (
           <span>{lastCardRankLabel(meta.lastAction)} landed on the table</span>
         ) : (
@@ -1822,7 +1824,7 @@ function LastCardFace({ card }: { card: LastCardCard }) {
 }
 
 function lastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardCard["color"]): boolean {
-  return card.color === currentColor || card.rank === top.rank;
+  return card.color === "wild" || card.color === currentColor || card.rank === top.rank;
 }
 
 function lastCardAria(card: LastCardCard): string {
@@ -1833,6 +1835,7 @@ function lastCardColorName(color: LastCardCard["color"]): string {
   if (color === "red") return "red";
   if (color === "yellow") return "yellow";
   if (color === "green") return "green";
+  if (color === "wild") return "wild";
   return "blue";
 }
 
@@ -1840,6 +1843,8 @@ function lastCardRankLabel(rank: LastCardCard["rank"]): string {
   if (rank === "skip") return "Skip";
   if (rank === "reverse") return "Reverse";
   if (rank === "draw2") return "+2";
+  if (rank === "wild") return "Wild";
+  if (rank === "wild4") return "Wild +4";
   return rank;
 }
 
@@ -1847,11 +1852,17 @@ function lastCardRankSymbol(rank: LastCardCard["rank"]): string {
   if (rank === "skip") return "S";
   if (rank === "reverse") return "R";
   if (rank === "draw2") return "+2";
+  if (rank === "wild") return "W";
+  if (rank === "wild4") return "+4";
   return rank;
 }
 
 function lastCardIsAction(rank: LastCardCard["rank"]): boolean {
-  return rank === "skip" || rank === "reverse" || rank === "draw2";
+  return rank === "skip" || rank === "reverse" || rank === "draw2" || rank === "wild" || rank === "wild4";
+}
+
+function lastCardIsWildAction(rank: LastCardCard["rank"]): boolean {
+  return rank === "wild" || rank === "wild4";
 }
 
 function isLastMove(lastMove: AppliedMove | null, row: number, column: number): boolean {
@@ -1891,7 +1902,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
-  if (gameId === "last-card") return "Match the top card by color or rank. Action cards skip, reverse, or make the other side draw two.";
+  if (gameId === "last-card") return "Match the top card by color or rank. Skips and reverses bounce the turn, +2 and wild +4 make the other side draw.";
   if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
   if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
   if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
@@ -1901,7 +1912,7 @@ function rulesFor(gameId: GameId): string {
 function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (difficulty === "casual") return "Loose and playful. It sees obvious wins but leaves room for drama.";
   if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
-  if (gameId === "last-card") return "Card-count menace. It saves action cards for awkward moments and keeps color options open.";
+  if (gameId === "last-card") return "Uno hand shark. It saves wilds for awkward moments and keeps the table color uncomfortable.";
   return gameId === "battleship"
     ? "Cold sonar mode. It hunts patterns and celebrates every hit internally."
     : "Ruthless table brain. It searches for wins, blocks traps, and prefers center control.";

@@ -482,7 +482,7 @@ describe("GameRoomView", () => {
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
   });
 
-  it("renders Last Card with a private hand and sends play or draw moves", () => {
+  it("renders Uno with a private hand and sends play or draw moves", () => {
     const onMove = vi.fn();
     render(
       <GameRoomView
@@ -529,7 +529,7 @@ describe("GameRoomView", () => {
       />
     );
 
-    expect(screen.getByRole("group", { name: "Last Card table" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Uno table" })).toBeInTheDocument();
     expect(screen.getByText("7 cards")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Play red 7" }));
