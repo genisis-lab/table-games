@@ -9,9 +9,19 @@ type ServerMessage = {
     roomId: string;
     gameId: string;
     boardVariant?: string;
+    turn?: string;
     board: Array<Array<string | null>>;
     players: Array<{ name: string; mark: string; guestToken?: string; connected?: boolean; isBot?: boolean }>;
     spectators: Array<{ name: string; guestToken?: string }>;
+    meta?: {
+      lastCard?: {
+        deck: unknown[];
+        deckCount: number;
+        discard: Array<{ color: string; rank: string }>;
+        hands: { p1: unknown[]; p2: unknown[] };
+        handCounts: { p1: number; p2: number };
+      };
+    };
     chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
     rematchRequests: string[];
@@ -112,6 +122,31 @@ describe("GameRoom Durable Object", () => {
     expect(performance.now() - botWaitStarted).toBeGreaterThanOrEqual(300);
     expect(botMove.move?.player).toBe("p2");
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
+  });
+
+  it("masks Last Card opponent hands and draw-pile order in room snapshots", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "last-card",
+        opponent: "bot"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+    const meta = snapshot.room?.meta?.lastCard;
+
+    expect(snapshot.room?.gameId).toBe("last-card");
+    expect(meta?.hands.p1).toHaveLength(7);
+    expect(meta?.hands.p2).toHaveLength(0);
+    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7 });
+    expect(meta?.deck).toHaveLength(0);
+    expect(meta?.deckCount).toBeGreaterThan(70);
+    expect(meta?.discard).toHaveLength(1);
   });
 
   it("creates Flappy Bird as a solo room without seating a bot opponent", async () => {

@@ -14,6 +14,7 @@ describe("Lobby", () => {
     expect(screen.getByText("Flappy Bird")).toBeInTheDocument();
     expect(screen.getByText("Snake")).toBeInTheDocument();
     expect(screen.getByText("2048")).toBeInTheDocument();
+    expect(screen.getByText("Last Card")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /play four in a row against bot/i }));
     expect(onCreateRoom).toHaveBeenCalledWith("four-in-a-row", {
@@ -39,5 +40,11 @@ describe("Lobby", () => {
       botDifficulty: "ruthless"
     });
     expect(screen.queryByRole("button", { name: /invite friend to snake/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /invite friend to last card/i }));
+    expect(onCreateRoom).toHaveBeenCalledWith("last-card", {
+      opponent: "friend",
+      botDifficulty: "ruthless"
+    });
   });
 });

@@ -105,6 +105,7 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "battleship") return "Bot-only fleet hunting with splashy misses and nasty hits.";
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
+  if (gameId === "last-card") return "A color-matching card race with skip, reverse, and draw-two trouble.";
   if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
   if (gameId === "snake") return "A fast little chase for food, clean turns, and just-one-more runs.";
   if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
@@ -194,6 +195,17 @@ function GamePreview({ gameId }: { gameId: GameId }) {
     return (
       <div className="mini-hex" aria-hidden="true">
         {Array.from({ length: 49 }).map((_, index) => <span className={index % 8 === 0 ? "p1" : index % 6 === 0 ? "p2" : ""} key={index} />)}
+      </div>
+    );
+  }
+
+  if (gameId === "last-card") {
+    return (
+      <div className="mini-last-card" aria-hidden="true">
+        <span className="card red">7</span>
+        <span className="card yellow">S</span>
+        <span className="card green">+2</span>
+        <span className="card blue">R</span>
       </div>
     );
   }

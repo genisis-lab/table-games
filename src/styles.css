@@ -380,6 +380,7 @@ button:disabled {
 .mini-checkers,
 .mini-hex,
 .mini-mancala,
+.mini-last-card,
 .mini-flappy,
 .mini-snake,
 .mini-twenty {
@@ -487,6 +488,57 @@ button:disabled {
 .mini-checkers .black::after,
 .mini-hex .p2::after {
   background: #111;
+}
+
+.mini-last-card {
+  position: relative;
+  display: block;
+  background:
+    radial-gradient(circle at 18% 18%, rgb(255 255 255 / 34%) 0 12%, transparent 13%),
+    #27405f;
+}
+
+.mini-last-card .card {
+  position: absolute;
+  display: grid;
+  width: 34%;
+  height: 50%;
+  place-items: center;
+  border: 3px solid var(--ink);
+  border-radius: 7px;
+  color: #fffdf7;
+  font-size: 1rem;
+  font-weight: 950;
+  box-shadow: 3px 3px 0 rgb(24 34 41 / 62%);
+}
+
+.mini-last-card .red {
+  top: 14%;
+  left: 13%;
+  rotate: -11deg;
+  background: #e94335;
+}
+
+.mini-last-card .yellow {
+  top: 22%;
+  left: 34%;
+  rotate: 5deg;
+  background: #f2c32c;
+  color: var(--ink);
+}
+
+.mini-last-card .green {
+  top: 35%;
+  left: 20%;
+  rotate: 8deg;
+  background: #20a96b;
+}
+
+.mini-last-card .blue {
+  top: 30%;
+  right: 12%;
+  rotate: -7deg;
+  background: #2674d9;
 }
 
 .mini-mancala {
@@ -761,6 +813,14 @@ button:disabled {
     linear-gradient(90deg, transparent 12%, #5c3415 12% 17%, transparent 17% 83%, #5c3415 83% 88%, transparent 88%),
     linear-gradient(transparent 12%, #5c3415 12% 17%, transparent 17% 83%, #5c3415 83% 88%, transparent 88%),
     #d99749;
+}
+
+.rail-icon.last-card {
+  border-radius: 6px;
+  background:
+    linear-gradient(27deg, transparent 0 34%, #e94335 35% 56%, transparent 57%),
+    linear-gradient(-24deg, transparent 0 34%, #2674d9 35% 58%, transparent 59%),
+    linear-gradient(90deg, #f2c32c 0 48%, #20a96b 48% 100%);
 }
 
 .rail-icon.flappy-bird {
@@ -1443,6 +1503,221 @@ button:disabled {
   border: 0;
   border-radius: 50%;
   background: #fff3c8;
+}
+
+.last-card-table {
+  display: grid;
+  gap: clamp(12px, 2vw, 18px);
+  width: min(100%, 780px);
+  min-height: min(680px, calc(100vh - 220px));
+  padding: clamp(14px, 2vw, 22px);
+  border: 5px solid var(--ink);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 16% 18%, rgb(255 255 255 / 14%) 0 10%, transparent 11%),
+    radial-gradient(circle at 84% 22%, rgb(255 211 61 / 18%) 0 12%, transparent 13%),
+    #1e6d55;
+  box-shadow: 10px 14px 0 var(--ink);
+}
+
+.last-card-players {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.last-card-player {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius);
+  background: rgb(255 253 247 / 92%);
+  box-shadow: 4px 4px 0 rgb(24 34 41 / 68%);
+}
+
+.last-card-player.active {
+  background: var(--yellow);
+}
+
+.last-card-player span,
+.last-card-player small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.last-card-player strong {
+  overflow: hidden;
+  font-size: 1.2rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.last-card-center {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.72fr) minmax(130px, 1fr);
+  align-items: center;
+  justify-items: center;
+  gap: clamp(14px, 3vw, 30px);
+  min-height: 220px;
+}
+
+.last-card-draw,
+.last-card-discard {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.last-card-draw {
+  border: 0;
+  background: transparent;
+  color: #fffdf7;
+  font-weight: 950;
+}
+
+.last-card-draw strong,
+.last-card-draw small,
+.last-card-pile-count {
+  padding: 5px 9px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper-strong);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 950;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.last-card-back,
+.last-card-face {
+  display: grid;
+  width: clamp(82px, 15vw, 118px);
+  aspect-ratio: 5 / 7;
+  border: 4px solid var(--ink);
+  border-radius: 9px;
+  box-shadow: 5px 6px 0 rgb(24 34 41 / 72%);
+}
+
+.last-card-back {
+  background:
+    radial-gradient(circle, rgb(255 253 247 / 92%) 0 12%, transparent 13%) 0 0 / 28px 28px,
+    linear-gradient(135deg, #f04438 0 25%, #2674d9 25% 50%, #20a96b 50% 75%, #f2c32c 75%);
+}
+
+.last-card-face {
+  position: relative;
+  place-items: center;
+  padding: 9px;
+  color: #fffdf7;
+  overflow: hidden;
+}
+
+.last-card-face::before {
+  position: absolute;
+  inset: 10px;
+  border: 3px solid rgb(255 253 247 / 72%);
+  border-radius: 50%;
+  content: "";
+}
+
+.last-card-face.red {
+  background: #e94335;
+}
+
+.last-card-face.yellow {
+  background: #f2c32c;
+  color: var(--ink);
+}
+
+.last-card-face.green {
+  background: #20a96b;
+}
+
+.last-card-face.blue {
+  background: #2674d9;
+}
+
+.last-card-face span,
+.last-card-face small {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  font-size: 0.7rem;
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.last-card-face strong {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.9rem, 6vw, 3.4rem);
+  line-height: 0.9;
+}
+
+.last-card-face small {
+  align-self: end;
+}
+
+.last-card-event {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  text-align: center;
+}
+
+.last-card-event span {
+  padding: 7px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: rgb(255 253 247 / 92%);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.last-card-hand {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  min-height: 170px;
+  gap: clamp(7px, 1.4vw, 12px);
+  overflow-x: auto;
+  padding: 8px 4px 12px;
+  scrollbar-color: var(--ink) rgb(255 253 247 / 42%);
+}
+
+.last-card-hand-card {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  transform-origin: 50% 100%;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.last-card-hand-card:not(:disabled):hover,
+.last-card-hand-card.playable:not(:disabled) {
+  transform: translateY(-8px);
+}
+
+.last-card-hand-card:disabled .last-card-face {
+  filter: saturate(0.62) brightness(0.82);
+}
+
+.last-card-spectator-note {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  color: #fffdf7;
+  font-weight: 950;
 }
 
 .gomoku-board button {
@@ -2631,6 +2906,7 @@ button:disabled {
   .battleship-wrap,
   .hex-board,
   .morris-board,
+  .last-card-table,
   .flappy-game,
   .snake-game,
   .twenty-game {
@@ -2645,6 +2921,25 @@ button:disabled {
   .snake-grid,
   .twenty-board {
     width: 100%;
+  }
+
+  .last-card-table {
+    min-height: 560px;
+  }
+
+  .last-card-center {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 180px;
+  }
+
+  .last-card-back,
+  .last-card-face {
+    width: clamp(72px, 25vw, 98px);
+  }
+
+  .last-card-hand {
+    justify-content: flex-start;
+    min-height: 142px;
   }
 
   .mancala-board {

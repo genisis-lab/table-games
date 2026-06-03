@@ -10,6 +10,7 @@ export type GameId =
   | "mancala"
   | "hex"
   | "nine-mens-morris"
+  | "last-card"
   | "flappy-bird"
   | "snake"
   | "twenty-forty-eight";
@@ -80,6 +81,39 @@ export interface MorrisMeta {
   removed: Record<PlayerMark, number>;
 }
 
+export type LastCardColor = "red" | "yellow" | "green" | "blue";
+export type LastCardRank =
+  | "0"
+  | "1"
+  | "2"
+  | "3"
+  | "4"
+  | "5"
+  | "6"
+  | "7"
+  | "8"
+  | "9"
+  | "skip"
+  | "reverse"
+  | "draw2";
+
+export interface LastCardCard {
+  id: string;
+  color: LastCardColor;
+  rank: LastCardRank;
+}
+
+export interface LastCardMeta {
+  deck: LastCardCard[];
+  deckCount: number;
+  discard: LastCardCard[];
+  hands: Record<PlayerMark, LastCardCard[]>;
+  handCounts: Record<PlayerMark, number>;
+  currentColor: LastCardColor;
+  lastDraw?: { player: PlayerMark; count: number };
+  lastAction?: LastCardRank;
+}
+
 export interface GameMeta {
   ultimate?: UltimateMeta;
   dots?: DotsMeta;
@@ -87,6 +121,7 @@ export interface GameMeta {
   battleship?: BattleshipMeta;
   mancala?: MancalaMeta;
   morris?: MorrisMeta;
+  lastCard?: LastCardMeta;
 }
 
 export interface GameDefinition {
@@ -232,6 +267,16 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     playerNames: { p1: "White", p2: "Black" },
     supportsFriend: true
   },
+  "last-card": {
+    id: "last-card",
+    name: "Last Card",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Warm Deck", p2: "Cool Deck" },
+    supportsFriend: true
+  },
   "flappy-bird": {
     id: "flappy-bird",
     name: "Flappy Bird",
@@ -288,6 +333,7 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
   mancala: [{ id: "classic", label: "Classic", detail: "6 pits" }],
   hex: [{ id: "classic", label: "Classic", detail: "11x11" }],
   "nine-mens-morris": [{ id: "classic", label: "Classic", detail: "24 points" }],
+  "last-card": [{ id: "classic", label: "Classic", detail: "7-card hands" }],
   "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }],
   snake: [{ id: "classic", label: "Classic", detail: "solo chase" }],
   "twenty-forty-eight": [{ id: "classic", label: "Classic", detail: "solo merge" }]
@@ -339,6 +385,12 @@ const MORRIS_NEIGHBORS: Record<string, string[]> = {
   "5,1": ["3,1", "5,3"], "5,3": ["4,3", "5,1", "5,5", "6,3"], "5,5": ["3,5", "5,3"],
   "6,0": ["3,0", "6,3"], "6,3": ["5,3", "6,0", "6,6"], "6,6": ["3,6", "6,3"]
 };
+
+const LAST_CARD_COLORS: LastCardColor[] = ["red", "yellow", "green", "blue"];
+const LAST_CARD_NUMBER_RANKS: LastCardRank[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+const LAST_CARD_ACTION_RANKS: LastCardRank[] = ["skip", "reverse", "draw2"];
+const LAST_CARD_DRAW_MOVE = -1;
+const LAST_CARD_HAND_SIZE = 7;
 
 export const GAME_IDS = Object.keys(DEFINITIONS) as GameId[];
 
@@ -438,6 +490,8 @@ export function applyGameMove(
       return applyHexMove(state, player, move);
     case "nine-mens-morris":
       return applyMorrisMove(state, player, move);
+    case "last-card":
+      return applyLastCardMove(state, player, move);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -467,6 +521,8 @@ export function getLegalMoves(state: GameState): GameMove[] {
       return getEmptyCellMoves(state);
     case "nine-mens-morris":
       return getMorrisMoves(state, state.turn);
+    case "last-card":
+      return getLastCardMoves(state, state.turn);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -483,6 +539,10 @@ export function chooseBotMove(
 ): GameMove | null {
   const legalMoves = getLegalMoves({ ...state, turn: player });
   if (legalMoves.length === 0 || state.winner) return null;
+
+  if (state.gameId === "last-card") {
+    return chooseLastCardMove({ ...state, turn: player }, player, legalMoves, difficulty);
+  }
 
   const winningMove = findImmediateWinningMove(state, player, legalMoves);
   if (winningMove) return winningMove;
@@ -598,6 +658,8 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   if (gameId === "nine-mens-morris") {
     return { morris: { placed: { p1: 0, p2: 0 }, removed: { p1: 0, p2: 0 } } };
   }
+
+  if (gameId === "last-card") return { lastCard: createLastCardMeta() };
 
   return undefined;
 }
@@ -899,6 +961,75 @@ function applyMorrisMove(state: GameState, player: PlayerMark, move: GameMove): 
   });
 }
 
+function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.lastCard;
+  const top = meta ? lastCardTop(meta) : undefined;
+  if (!meta || !top) return { ok: false, state, reason: "The deck is not ready." };
+
+  if (move.column === LAST_CARD_DRAW_MOVE) {
+    const drawn = drawLastCards(meta, player, 1);
+    if (drawn === 0) return { ok: false, state, reason: "The draw pile is empty." };
+
+    meta.lastDraw = { player, count: drawn };
+    delete meta.lastAction;
+    syncLastCardHandCounts(meta);
+    return {
+      ok: true,
+      point: { row: 0, column: LAST_CARD_DRAW_MOVE },
+      state: {
+        ...state,
+        turn: otherPlayer(player),
+        winner: null,
+        winningLine: [],
+        moveCount: state.moveCount + 1,
+        meta: { ...clonedMeta, lastCard: meta }
+      }
+    };
+  }
+
+  if (!Number.isInteger(move.column) || move.column < 0) {
+    return { ok: false, state, reason: "Choose a card from your hand." };
+  }
+
+  const hand = meta.hands[player];
+  const card = hand[move.column];
+  if (!card) return { ok: false, state, reason: "That card is not in your hand." };
+  if (!isLastCardPlayable(card, top, meta.currentColor)) {
+    return { ok: false, state, reason: "Match the discard color or rank." };
+  }
+
+  hand.splice(move.column, 1);
+  meta.discard.push(card);
+  meta.currentColor = card.color;
+  meta.lastAction = card.rank;
+  delete meta.lastDraw;
+
+  const opponent = otherPlayer(player);
+  let nextTurn = opponent;
+  if (card.rank === "draw2") {
+    const drawn = drawLastCards(meta, opponent, 2);
+    meta.lastDraw = { player: opponent, count: drawn };
+    nextTurn = player;
+  } else if (card.rank === "skip" || card.rank === "reverse") {
+    nextTurn = player;
+  }
+
+  syncLastCardHandCounts(meta);
+  return {
+    ok: true,
+    point: { row: 0, column: move.column },
+    state: {
+      ...state,
+      turn: nextTurn,
+      winner: hand.length === 0 ? player : null,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, lastCard: meta }
+    }
+  };
+}
+
 function okMove(
   state: GameState,
   board: Cell[][],
@@ -1126,6 +1257,37 @@ function getMorrisMoves(state: GameState, player: PlayerMark): GameMove[] {
   return moves;
 }
 
+function getLastCardMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.lastCard;
+  const top = meta ? lastCardTop(meta) : undefined;
+  if (!meta || !top) return [];
+
+  const playable = getPlayableLastCardIndexes(meta, player).map((column) => ({ column }));
+  return canDrawLastCard(meta) ? [...playable, { column: LAST_CARD_DRAW_MOVE }] : playable;
+}
+
+function chooseLastCardMove(
+  state: GameState,
+  player: PlayerMark,
+  legalMoves: GameMove[],
+  difficulty: BotDifficulty
+): GameMove {
+  const meta = state.meta?.lastCard;
+  if (!meta) return legalMoves[0];
+
+  const plays = legalMoves.filter((move) => move.column !== LAST_CARD_DRAW_MOVE);
+  if (plays.length === 0) return legalMoves.find((move) => move.column === LAST_CARD_DRAW_MOVE) ?? legalMoves[0];
+
+  const winning = plays.find((move) => meta.hands[player].length === 1 && meta.hands[player][move.column]);
+  if (winning) return winning;
+
+  const scored = plays
+    .map((move) => ({ move, score: lastCardMoveScore(meta, player, move, difficulty) }))
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.move ?? plays[0];
+}
+
 function resolveTarget(state: GameState, move: GameMove): { ok: true; point: BoardPoint } | { ok: false; reason: string } {
   const definition = getGameDefinition(state.gameId);
   if (!Number.isInteger(move.column) || move.column < 0 || move.column >= state.board[0].length) {
@@ -1253,6 +1415,10 @@ function boardScore(state: GameState, bot: PlayerMark): number {
   if (state.gameId === "battleship") {
     const shots = bot === "p1" ? state.meta?.battleship?.humanShots : state.meta?.battleship?.botShots;
     return Object.values(shots ?? {}).filter((shot) => shot === "hit").length * 200;
+  }
+  if (state.gameId === "last-card") {
+    const meta = state.meta?.lastCard;
+    return meta ? (meta.handCounts[otherPlayer(bot)] - meta.handCounts[bot]) * 350 : 0;
   }
 
   const opponent = otherPlayer(bot);
@@ -1500,6 +1666,155 @@ function makeFleetShips(offset: number): BattleshipShip[] {
 
 function flattenFleet(fleet: BattleshipShip[]): BattleshipShot[] {
   return fleet.flatMap((ship) => ship.cells);
+}
+
+function createLastCardMeta(): LastCardMeta {
+  const deck = shuffleLastCards(makeLastCardDeck());
+  const hands: Record<PlayerMark, LastCardCard[]> = {
+    p1: deck.splice(0, LAST_CARD_HAND_SIZE),
+    p2: deck.splice(0, LAST_CARD_HAND_SIZE)
+  };
+  const firstCardIndex = deck.findIndex((card) => LAST_CARD_NUMBER_RANKS.includes(card.rank));
+  const [firstCard] = deck.splice(firstCardIndex >= 0 ? firstCardIndex : 0, 1);
+  const meta: LastCardMeta = {
+    deck,
+    deckCount: deck.length,
+    discard: [firstCard],
+    hands,
+    handCounts: { p1: hands.p1.length, p2: hands.p2.length },
+    currentColor: firstCard.color
+  };
+  return syncLastCardHandCounts(meta);
+}
+
+function makeLastCardDeck(): LastCardCard[] {
+  const deck: LastCardCard[] = [];
+  for (const color of LAST_CARD_COLORS) {
+    deck.push({ id: `${color}-0-a`, color, rank: "0" });
+    for (const rank of LAST_CARD_NUMBER_RANKS.slice(1)) {
+      deck.push({ id: `${color}-${rank}-a`, color, rank });
+      deck.push({ id: `${color}-${rank}-b`, color, rank });
+    }
+    for (const rank of LAST_CARD_ACTION_RANKS) {
+      deck.push({ id: `${color}-${rank}-a`, color, rank });
+      deck.push({ id: `${color}-${rank}-b`, color, rank });
+    }
+  }
+  return deck;
+}
+
+function shuffleLastCards(cards: LastCardCard[]): LastCardCard[] {
+  const shuffled = [...cards];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function lastCardTop(meta: LastCardMeta): LastCardCard | undefined {
+  return meta.discard.at(-1);
+}
+
+function isLastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardColor): boolean {
+  return card.color === currentColor || card.rank === top.rank;
+}
+
+function getPlayableLastCardIndexes(meta: LastCardMeta, player: PlayerMark): number[] {
+  const top = lastCardTop(meta);
+  if (!top) return [];
+  return meta.hands[player]
+    .map((card, index) => ({ card, index }))
+    .filter(({ card }) => isLastCardPlayable(card, top, meta.currentColor))
+    .map(({ index }) => index);
+}
+
+function canDrawLastCard(meta: LastCardMeta): boolean {
+  return meta.deck.length > 0 || meta.discard.length > 1;
+}
+
+function drawLastCards(meta: LastCardMeta, player: PlayerMark, count: number): number {
+  let drawn = 0;
+  while (drawn < count) {
+    if (meta.deck.length === 0) reshuffleLastCards(meta);
+    const card = meta.deck.pop();
+    if (!card) break;
+    meta.hands[player].push(card);
+    drawn += 1;
+  }
+  syncLastCardHandCounts(meta);
+  return drawn;
+}
+
+function reshuffleLastCards(meta: LastCardMeta): void {
+  const top = lastCardTop(meta);
+  if (!top || meta.discard.length <= 1) return;
+  meta.deck = shuffleLastCards(meta.discard.slice(0, -1));
+  meta.discard = [top];
+}
+
+function syncLastCardHandCounts(meta: LastCardMeta): LastCardMeta {
+  meta.handCounts = {
+    p1: meta.hands.p1.length,
+    p2: meta.hands.p2.length
+  };
+  meta.deckCount = meta.deck.length;
+  return meta;
+}
+
+function lastCardMoveScore(
+  meta: LastCardMeta,
+  player: PlayerMark,
+  move: GameMove,
+  difficulty: BotDifficulty
+): number {
+  const card = meta.hands[player][move.column];
+  if (!card) return Number.NEGATIVE_INFINITY;
+
+  const opponent = otherPlayer(player);
+  const remainingHand = meta.hands[player].filter((_, index) => index !== move.column);
+  const sameColorLeft = remainingHand.filter((candidate) => candidate.color === card.color).length;
+  const sameRankLeft = remainingHand.filter((candidate) => candidate.rank === card.rank).length;
+  const opponentPressure = Math.max(0, 4 - meta.hands[opponent].length) * 18;
+  const actionScore = card.rank === "draw2"
+    ? 110 + opponentPressure
+    : card.rank === "skip" || card.rank === "reverse"
+      ? 72 + opponentPressure
+      : 0;
+
+  return (
+    actionScore +
+    sameColorLeft * (difficulty === "casual" ? 10 : 18) +
+    sameRankLeft * 8 +
+    lastCardRankScore(card.rank) +
+    (card.color === meta.currentColor ? 9 : 0) -
+    remainingHand.length * 2
+  );
+}
+
+function lastCardRankScore(rank: LastCardRank): number {
+  if (rank === "draw2") return 24;
+  if (rank === "skip" || rank === "reverse") return 18;
+  return Number(rank);
+}
+
+export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
+  if (!meta?.lastCard) return meta;
+
+  const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
+  const lastCard = next.lastCard!;
+  const counts = {
+    p1: meta.lastCard.handCounts?.p1 ?? meta.lastCard.hands.p1.length,
+    p2: meta.lastCard.handCounts?.p2 ?? meta.lastCard.hands.p2.length
+  };
+  lastCard.handCounts = counts;
+  lastCard.deckCount = meta.lastCard.deckCount ?? meta.lastCard.deck.length;
+  lastCard.deck = [];
+  lastCard.hands = {
+    p1: player === "p1" ? lastCard.hands.p1 : [],
+    p2: player === "p2" ? lastCard.hands.p2 : []
+  };
+  return next;
 }
 
 function isMorrisPoint(point: BoardPoint): boolean {

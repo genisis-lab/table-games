@@ -17,7 +17,7 @@ import {
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, PlayerMark } from "../shared/games";
+import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
 import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 
@@ -347,6 +347,10 @@ function Board({
 
   if (room.gameId === "nine-mens-morris") {
     return <MorrisBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
+  }
+
+  if (room.gameId === "last-card") {
+    return <LastCardBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
   }
 
   if (room.gameId === "snake") {
@@ -859,6 +863,100 @@ function MorrisBoard({
           );
         })
       )}
+    </div>
+  );
+}
+
+const LAST_CARD_DRAW_COLUMN = -1;
+
+function LastCardBoard({
+  room,
+  canMove,
+  currentMark,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.lastCard;
+  const topCard = meta?.discard.at(-1);
+  if (!meta || !topCard) return null;
+
+  const definition = getGameDefinition(room.gameId);
+  const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
+  const deckCount = meta.deckCount ?? meta.deck.length;
+  const canDraw = canMove && (deckCount > 0 || meta.discard.length > 1);
+
+  return (
+    <div className="last-card-table" role="group" aria-label="Last Card table">
+      <div className="last-card-players" aria-label="Card counts">
+        {(["p1", "p2"] as const).map((mark) => {
+          const player = room.players.find((candidate) => candidate.mark === mark);
+          return (
+            <div className={`last-card-player ${mark} ${room.turn === mark && !room.winner ? "active" : ""}`} key={mark}>
+              <span>{definition.playerNames[mark]}</span>
+              <strong>{meta.handCounts[mark]} cards</strong>
+              <small>{player?.name ?? "Open seat"}</small>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="last-card-center">
+        <button
+          className="last-card-draw"
+          type="button"
+          disabled={!canDraw}
+          aria-label="Draw a card"
+          onClick={() => onMove({ column: LAST_CARD_DRAW_COLUMN })}
+        >
+          <span className="last-card-back" />
+          <strong>Draw</strong>
+          <small>{deckCount} left</small>
+        </button>
+
+        <div className="last-card-discard" aria-label={`Discard pile showing ${lastCardAria(topCard)}`}>
+          <LastCardFace card={topCard} />
+          <span className="last-card-pile-count">{meta.discard.length} played</span>
+        </div>
+      </div>
+
+      <div className="last-card-event" aria-live="polite">
+        {meta.lastDraw ? (
+          <span>{definition.playerNames[meta.lastDraw.player]} drew {meta.lastDraw.count}</span>
+        ) : meta.lastAction && lastCardIsAction(meta.lastAction) ? (
+          <span>{lastCardRankLabel(meta.lastAction)} landed on the table</span>
+        ) : (
+          <span>Match {lastCardColorName(meta.currentColor)} or {lastCardRankLabel(topCard.rank)}</span>
+        )}
+      </div>
+
+      <div className="last-card-hand" aria-label={currentMark ? "Your hand" : "Spectator hand view"}>
+        {currentMark && hand.length > 0 ? (
+          hand.map((card, index) => {
+            const playable = lastCardPlayable(card, topCard, meta.currentColor);
+            return (
+              <button
+                className={`last-card-hand-card ${card.color} ${playable ? "playable" : ""}`}
+                type="button"
+                disabled={!canMove || !playable}
+                aria-label={`Play ${lastCardAria(card)}`}
+                onClick={() => onMove({ column: index })}
+                key={card.id}
+              >
+                <LastCardFace card={card} />
+              </button>
+            );
+          })
+        ) : (
+          <div className="last-card-spectator-note">
+            <span className="last-card-back" />
+            <strong>{currentMark ? "No cards left" : "Hands are private"}</strong>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1814,6 +1912,49 @@ function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"
   );
 }
 
+function LastCardFace({ card }: { card: LastCardCard }) {
+  return (
+    <span className={`last-card-face ${card.color}`} aria-hidden="true">
+      <span>{lastCardRankLabel(card.rank)}</span>
+      <strong>{lastCardRankSymbol(card.rank)}</strong>
+      <small>{lastCardColorName(card.color)}</small>
+    </span>
+  );
+}
+
+function lastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardCard["color"]): boolean {
+  return card.color === currentColor || card.rank === top.rank;
+}
+
+function lastCardAria(card: LastCardCard): string {
+  return `${lastCardColorName(card.color)} ${lastCardRankLabel(card.rank)}`;
+}
+
+function lastCardColorName(color: LastCardCard["color"]): string {
+  if (color === "red") return "red";
+  if (color === "yellow") return "yellow";
+  if (color === "green") return "green";
+  return "blue";
+}
+
+function lastCardRankLabel(rank: LastCardCard["rank"]): string {
+  if (rank === "skip") return "Skip";
+  if (rank === "reverse") return "Reverse";
+  if (rank === "draw2") return "+2";
+  return rank;
+}
+
+function lastCardRankSymbol(rank: LastCardCard["rank"]): string {
+  if (rank === "skip") return "S";
+  if (rank === "reverse") return "R";
+  if (rank === "draw2") return "+2";
+  return rank;
+}
+
+function lastCardIsAction(rank: LastCardCard["rank"]): boolean {
+  return rank === "skip" || rank === "reverse" || rank === "draw2";
+}
+
 function isLastMove(lastMove: AppliedMove | null, row: number, column: number): boolean {
   return Boolean(lastMove && lastMove.row === row && lastMove.column === column);
 }
@@ -1851,6 +1992,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
+  if (gameId === "last-card") return "Match the top card by color or rank. Action cards skip, reverse, or make the other side draw two.";
   if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
   if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
   if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
@@ -1860,6 +2002,7 @@ function rulesFor(gameId: GameId): string {
 function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (difficulty === "casual") return "Loose and playful. It sees obvious wins but leaves room for drama.";
   if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
+  if (gameId === "last-card") return "Card-count menace. It saves action cards for awkward moments and keeps color options open.";
   return gameId === "battleship"
     ? "Cold sonar mode. It hunts patterns and celebrates every hit internally."
     : "Ruthless table brain. It searches for wins, blocks traps, and prefers center control.";

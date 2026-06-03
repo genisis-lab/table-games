@@ -5,6 +5,7 @@ import {
   createGameState,
   getDefaultBoardVariant,
   getGameDefinition,
+  maskGameMetaForPlayer,
   isBoardVariantForGame,
   isBotDifficulty,
   isGameId,
@@ -201,7 +202,7 @@ export class GameRoom extends DurableObject<Env> {
     if (changed) {
       room.updatedAt = Date.now();
       await this.saveRoom(room);
-      this.broadcast({ type: "presence_changed", room: this.snapshot(room) });
+      this.broadcastRoom(room, (snapshot) => ({ type: "presence_changed", room: snapshot }));
     }
   }
 
@@ -255,9 +256,8 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    const snapshot = this.snapshot(room);
-    this.send(ws, { type: "room_snapshot", room: snapshot });
-    this.broadcast({ type: "presence_changed", room: snapshot });
+    this.sendRoom(ws, room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
+    this.broadcastRoom(room, (snapshot) => ({ type: "presence_changed", room: snapshot }));
   }
 
   private async handleMove(
@@ -286,15 +286,15 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    const snapshot = this.snapshot(room);
-    this.broadcast({
+    const appliedMove = createAppliedMove(player.mark, move, result.point);
+    this.broadcastRoom(room, (snapshot) => ({
       type: "move_applied",
       room: snapshot,
-      move: createAppliedMove(player.mark, move, result.point)
-    });
+      move: appliedMove
+    }));
 
-    if (snapshot.winner) {
-      this.broadcast({ type: "game_over", room: snapshot, winner: snapshot.winner });
+    if (room.game.winner) {
+      this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
       return;
     }
 
@@ -331,7 +331,7 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    this.broadcast({ type: "chat_added", room: this.snapshot(room), chat });
+    this.broadcastRoom(room, (snapshot) => ({ type: "chat_added", room: snapshot, chat }));
   }
 
   private async handleReaction(
@@ -363,7 +363,7 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    this.broadcast({ type: "reaction_added", room: this.snapshot(room), reaction });
+    this.broadcastRoom(room, (snapshot) => ({ type: "reaction_added", room: snapshot, reaction }));
   }
 
   private async handleRematch(
@@ -381,13 +381,13 @@ export class GameRoom extends DurableObject<Env> {
       if (!hasAllHumanPlayerVotes(room, room.rematchRequests)) {
         room.updatedAt = Date.now();
         await this.saveRoom(room);
-        this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+        this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
         return;
       }
     }
 
     await this.resetGame(room);
-    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
     await this.maybePlayBot(room);
   }
 
@@ -415,7 +415,7 @@ export class GameRoom extends DurableObject<Env> {
     if (!hasAllHumanPlayerVotes(room, room.undoRequests)) {
       room.updatedAt = Date.now();
       await this.saveRoom(room);
-      this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+      this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
       return;
     }
 
@@ -428,7 +428,7 @@ export class GameRoom extends DurableObject<Env> {
     room.rematchRequests = [];
     room.updatedAt = Date.now();
     await this.saveRoom(room);
-    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
   }
 
   private async handleClaimSeat(
@@ -462,9 +462,8 @@ export class GameRoom extends DurableObject<Env> {
     room.rematchRequests = [];
     room.updatedAt = Date.now();
     await this.saveRoom(room);
-    const snapshot = this.snapshot(room);
-    this.send(ws, { type: "room_snapshot", room: snapshot });
-    this.broadcast({ type: "presence_changed", room: snapshot });
+    this.sendRoom(ws, room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
+    this.broadcastRoom(room, (snapshot) => ({ type: "presence_changed", room: snapshot }));
   }
 
   private async handleSwitchGame(
@@ -492,7 +491,7 @@ export class GameRoom extends DurableObject<Env> {
     room.gameId = gameId;
     room.boardVariant = getDefaultBoardVariant(gameId);
     await this.resetGame(room);
-    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
     await this.maybePlayBot(room);
   }
 
@@ -514,7 +513,7 @@ export class GameRoom extends DurableObject<Env> {
 
     room.boardVariant = variant;
     await this.resetGame(room);
-    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
     await this.maybePlayBot(room);
   }
 
@@ -542,7 +541,7 @@ export class GameRoom extends DurableObject<Env> {
     room.botDifficulty = difficulty;
     room.updatedAt = Date.now();
     await this.saveRoom(room);
-    this.broadcast({ type: "room_snapshot", room: this.snapshot(room) });
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
   }
 
   private async maybePlayBot(room: StoredRoom): Promise<void> {
@@ -567,15 +566,17 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    const snapshot = this.snapshot(room);
-    this.broadcast({
+    const appliedMove = createAppliedMove(bot.mark, move, result.point);
+    this.broadcastRoom(room, (snapshot) => ({
       type: "move_applied",
       room: snapshot,
-      move: createAppliedMove(bot.mark, move, result.point)
-    });
+      move: appliedMove
+    }));
 
-    if (snapshot.winner) {
-      this.broadcast({ type: "game_over", room: snapshot, winner: snapshot.winner });
+    if (room.game.winner) {
+      this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
+    } else if (room.game.turn === bot.mark) {
+      await this.maybePlayBot(room);
     }
   }
 
@@ -635,7 +636,8 @@ export class GameRoom extends DurableObject<Env> {
     await this.ctx.storage.put(ROOM_KEY, room);
   }
 
-  private snapshot(room: StoredRoom): RoomSnapshot {
+  private snapshot(room: StoredRoom, guestToken?: string): RoomSnapshot {
+    const viewerMark = room.players.find((player) => player.guestToken === guestToken)?.mark;
     return {
       roomId: room.roomId,
       gameId: room.gameId,
@@ -649,7 +651,7 @@ export class GameRoom extends DurableObject<Env> {
       winner: room.game.winner,
       winningLine: room.game.winningLine,
       moveCount: room.game.moveCount,
-      meta: room.game.meta,
+      meta: maskGameMetaForPlayer(room.game.meta, viewerMark),
       chat: room.chat,
       reactionEvents: room.reactionEvents,
       moveHistory: room.moveHistory,
@@ -658,6 +660,29 @@ export class GameRoom extends DurableObject<Env> {
       createdAt: room.createdAt,
       updatedAt: room.updatedAt
     };
+  }
+
+  private sendRoom(
+    ws: WebSocket,
+    room: StoredRoom,
+    makeMessage: (snapshot: RoomSnapshot) => ServerMessage
+  ): void {
+    const attachment = (ws.deserializeAttachment() ?? {}) as SocketAttachment;
+    this.send(ws, makeMessage(this.snapshot(room, attachment.guestToken)));
+  }
+
+  private broadcastRoom(
+    room: StoredRoom,
+    makeMessage: (snapshot: RoomSnapshot) => ServerMessage
+  ): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const attachment = (socket.deserializeAttachment() ?? {}) as SocketAttachment;
+        socket.send(JSON.stringify(makeMessage(this.snapshot(room, attachment.guestToken))));
+      } catch {
+        // Dead sockets are handled by the close/error hooks.
+      }
+    }
   }
 
   private ensureRoomShape(room: StoredRoom, roomId: string): StoredRoom {
@@ -770,6 +795,7 @@ function moveLabel(move: GameMove, point: { row: number; column: number }, gameI
     const to = `${columnName(point.column)}${point.row + 1}`;
     return from ? `${from}-${to}` : to;
   }
+  if (gameId === "last-card") return point.column < 0 ? "Draw" : `Card ${point.column + 1}`;
   return `${columnName(point.column)}${point.row + 1}`;
 }
 

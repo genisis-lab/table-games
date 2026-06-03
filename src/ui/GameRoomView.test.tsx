@@ -374,6 +374,64 @@ describe("GameRoomView", () => {
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
   });
 
+  it("renders Last Card with a private hand and sends play or draw moves", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "last-card",
+          opponent: "bot",
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          board: [[null]],
+          meta: {
+            lastCard: {
+              deck: [],
+              deckCount: 25,
+              discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+              hands: {
+                p1: [
+                  { id: "red-7-a", color: "red", rank: "7" },
+                  { id: "green-2-a", color: "green", rank: "2" }
+                ],
+                p2: []
+              },
+              handCounts: { p1: 2, p2: 7 },
+              currentColor: "red"
+            }
+          }
+        }}
+        guestToken="red-token"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "Last Card table" })).toBeInTheDocument();
+    expect(screen.getByText("7 cards")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Play red 7" }));
+    expect(onMove).toHaveBeenCalledWith({ column: 0 });
+
+    expect(screen.getByRole("button", { name: "Play green 2" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Draw a card" }));
+    expect(onMove).toHaveBeenCalledWith({ column: -1 });
+  });
+
   it("starts Flappy Bird only from the start button while ready", () => {
     render(
       <GameRoomView

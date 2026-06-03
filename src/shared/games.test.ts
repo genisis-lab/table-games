@@ -325,6 +325,94 @@ describe("New game engines", () => {
     expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
+  it("deals Last Card hands and starts on a number discard", () => {
+    const state = createGameState("last-card");
+    const meta = state.meta?.lastCard;
+
+    expect(getGameDefinition("last-card")).toMatchObject({
+      name: "Last Card",
+      supportsFriend: true
+    });
+    expect(meta?.hands.p1).toHaveLength(7);
+    expect(meta?.hands.p2).toHaveLength(7);
+    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7 });
+    expect(meta?.discard).toHaveLength(1);
+    expect(Number(meta?.discard[0].rank)).not.toBeNaN();
+  });
+
+  it("plays Last Card matches by color or rank and updates hand counts", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [],
+      deckCount: 0,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [
+          { id: "blue-5-a", color: "blue", rank: "5" },
+          { id: "green-2-a", color: "green", rank: "2" }
+        ],
+        p2: [{ id: "yellow-9-a", color: "yellow", rank: "9" }]
+      },
+      handCounts: { p1: 2, p2: 1 },
+      currentColor: "red"
+    };
+
+    const next = play(state, "p1", { column: 0 });
+
+    expect(next.meta?.lastCard?.discard.at(-1)).toMatchObject({ color: "blue", rank: "5" });
+    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 1 });
+    expect(next.turn).toBe("p2");
+  });
+
+  it("applies Last Card draw-two as a skipped opponent turn", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [
+        { id: "green-1-a", color: "green", rank: "1" },
+        { id: "yellow-4-a", color: "yellow", rank: "4" }
+      ],
+      deckCount: 2,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [{ id: "red-draw2-a", color: "red", rank: "draw2" }],
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }]
+      },
+      handCounts: { p1: 1, p2: 1 },
+      currentColor: "red"
+    };
+
+    const next = play(state, "p1", { column: 0 });
+
+    expect(next.winner).toBe("p1");
+    expect(next.turn).toBe("p1");
+    expect(next.meta?.lastCard?.handCounts.p2).toBe(3);
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 2 });
+  });
+
+  it("chooses a sharp Last Card action card before a plain match", () => {
+    const state = createGameState("last-card");
+    state.turn = "p2";
+    state.meta!.lastCard = {
+      deck: [],
+      deckCount: 0,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [
+          { id: "green-1-a", color: "green", rank: "1" },
+          { id: "green-2-a", color: "green", rank: "2" }
+        ],
+        p2: [
+          { id: "red-draw2-a", color: "red", rank: "draw2" },
+          { id: "blue-5-a", color: "blue", rank: "5" }
+        ]
+      },
+      handCounts: { p1: 2, p2: 2 },
+      currentColor: "red"
+    };
+
+    expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ column: 0 });
+  });
+
   it("sows stones and updates stores in Mancala", () => {
     const state = play(createGameState("mancala"), "p1", { column: 2 });
 
