@@ -2054,4 +2054,194 @@ function boardScore(state: GameState, bot: PlayerMark): number {
 
 function lineScore(state: GameState, player: PlayerMark): number {
   let score = 0;
-  for (let row = 0; row < state.board.length; row += 1)
+  for (let row = 0; row < state.board.length; row += 1) {
+    for (let column = 0; column < state.board[0].length; column += 1) {
+      if (state.board[row][column] !== player) continue;
+      for (const direction of DIRECTIONS) {
+        const before = { row: row - direction.row, column: column - direction.column };
+        if (cellAt(state.board, before) === player) continue;
+        let count = 0;
+        let cursor = { row, column };
+        while (cellAt(state.board, cursor) === player) {
+          count += 1;
+          cursor = { row: cursor.row + direction.row, column: cursor.column + direction.column };
+        }
+        const openEnds = Number(cellAt(state.board, before) === null) + Number(cellAt(state.board, cursor) === null);
+        score += sequenceScore(count, openEnds);
+      }
+    }
+  }
+  return score;
+}
+
+function sequenceScore(count: number, openEnds: number): number {
+  if (count >= 5) return 900_000;
+  if (count === 4) return openEnds === 2 ? 120_000 : 55_000;
+  if (count === 3) return openEnds === 2 ? 14_000 : 4_000;
+  if (count === 2) return openEnds === 2 ? 1_100 : 260;
+  return openEnds === 2 ? 40 : 10;
+}
+
+function centerScore(state: GameState, player: PlayerMark): number {
+  const centerRow = (state.board.length - 1) / 2;
+  const centerColumn = (state.board[0].length - 1) / 2;
+  return state.board.reduce((total, row, rowIndex) => total + row.reduce((rowTotal, cell, columnIndex) => {
+    if (cell !== player) return rowTotal;
+    const distance = Math.abs(rowIndex - centerRow) + Math.abs(columnIndex - centerColumn);
+    return rowTotal + Math.max(0, 24 - distance * 3);
+  }, 0), 0);
+}
+
+function pieceScore(state: GameState, player: PlayerMark): number {
+  let score = state.board.flat().filter((cell) => cell === player).length * 80;
+  if (state.gameId === "checkers") {
+    score += (state.meta?.checkers?.kings ?? []).filter((key) => cellAt(state.board, pointFromKey(key)) === player).length * 90;
+  }
+  return score;
+}
+
+function orderedMoves(state: GameState, moves: GameMove[]): GameMove[] {
+  const centerColumn = (state.board[0].length - 1) / 2;
+  const centerRow = (state.board.length - 1) / 2;
+  return [...moves].sort((a, b) => {
+    const aDistance = Math.abs((a.row ?? centerRow) - centerRow) + Math.abs(a.column - centerColumn);
+    const bDistance = Math.abs((b.row ?? centerRow) - centerRow) + Math.abs(b.column - centerColumn);
+    return aDistance - bDistance;
+  });
+}
+
+function reversiFlips(board: Cell[][], point: BoardPoint, player: PlayerMark): BoardPoint[] {
+  if (cellAt(board, point)) return [];
+  const opponent = otherPlayer(player);
+  const flips: BoardPoint[] = [];
+  for (const direction of [...DIRECTIONS, { row: -1, column: 0 }, { row: 0, column: -1 }, { row: -1, column: -1 }, { row: -1, column: 1 }]) {
+    const line: BoardPoint[] = [];
+    let cursor = { row: point.row + direction.row, column: point.column + direction.column };
+    while (cellAt(board, cursor) === opponent) {
+      line.push(cursor);
+      cursor = { row: cursor.row + direction.row, column: cursor.column + direction.column };
+    }
+    if (line.length > 0 && cellAt(board, cursor) === player) flips.push(...line);
+  }
+  return flips;
+}
+
+function completedBoxes(meta: DotsMeta, edge: "h" | "v", row: number, column: number): BoardPoint[] {
+  const boxes: BoardPoint[] = [];
+  const check = (boxRow: number, boxColumn: number) => {
+    if (boxRow < 0 || boxRow >= meta.size || boxColumn < 0 || boxColumn >= meta.size) return;
+    if (
+      meta.hEdges[boxRow][boxColumn] &&
+      meta.hEdges[boxRow + 1][boxColumn] &&
+      meta.vEdges[boxRow][boxColumn] &&
+      meta.vEdges[boxRow][boxColumn + 1]
+    ) {
+      boxes.push({ row: boxRow, column: boxColumn });
+    }
+  };
+  if (edge === "h") {
+    check(row - 1, column);
+    check(row, column);
+  } else {
+    check(row, column - 1);
+    check(row, column);
+  }
+  return boxes;
+}
+
+function countWinner(board: Cell[][]): Winner {
+  const p1 = board.flat().filter((cell) => cell === "p1").length;
+  const p2 = board.flat().filter((cell) => cell === "p2").length;
+  return p1 === p2 ? "draw" : p1 > p2 ? "p1" : "p2";
+}
+
+function hexPath(board: Cell[][], player: PlayerMark): BoardPoint[] {
+  const queue: BoardPoint[] = [];
+  const cameFrom = new Map<string, string | null>();
+  for (let i = 0; i < board.length; i += 1) {
+    const point = player === "p1" ? { row: i, column: 0 } : { row: 0, column: i };
+    if (cellAt(board, point) === player) {
+      queue.push(point);
+      cameFrom.set(keyOf(point), null);
+    }
+  }
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const point = queue[index];
+    const finished = player === "p1" ? point.column === board[0].length - 1 : point.row === board.length - 1;
+    if (finished) return rebuildPath(point, cameFrom);
+    for (const delta of HEX_DIRECTIONS) {
+      const next = { row: point.row + delta.row, column: point.column + delta.column };
+      const key = keyOf(next);
+      if (cellAt(board, next) === player && !cameFrom.has(key)) {
+        cameFrom.set(key, keyOf(point));
+        queue.push(next);
+      }
+    }
+  }
+  return [];
+}
+
+function rebuildPath(end: BoardPoint, cameFrom: Map<string, string | null>): BoardPoint[] {
+  const path: BoardPoint[] = [];
+  let cursor: string | null = keyOf(end);
+  while (cursor) {
+    path.push(pointFromKey(cursor));
+    cursor = cameFrom.get(cursor) ?? null;
+  }
+  return path.reverse();
+}
+
+function localCells(state: GameState, board: Cell[][], mini: number): Cell[] {
+  const localSize = ultimateLocalSize(state);
+  const startRow = Math.floor(mini / localSize) * localSize;
+  const startColumn = (mini % localSize) * localSize;
+  const cells: Cell[] = [];
+  for (let row = startRow; row < startRow + localSize; row += 1) {
+    for (let column = startColumn; column < startColumn + localSize; column += 1) cells.push(board[row][column]);
+  }
+  return cells;
+}
+
+function findLocalTicLine(state: GameState, board: Cell[][], mini: number, player: PlayerMark): BoardPoint[] {
+  const localSize = ultimateLocalSize(state);
+  const startRow = Math.floor(mini / localSize) * localSize;
+  const startColumn = (mini % localSize) * localSize;
+  const lines = squareLines(localSize);
+  for (const line of lines) {
+    const points = line.map((index) => ({ row: startRow + Math.floor(index / localSize), column: startColumn + (index % localSize) }));
+    if (points.every((point) => cellAt(board, point) === player)) return points;
+  }
+  return [];
+}
+
+function findMetaLine(localWinners: Winner[], player: PlayerMark, localSize: number): number[] {
+  const lines = squareLines(localSize);
+  return lines.find((line) => line.every((index) => localWinners[index] === player)) ?? [];
+}
+
+function miniCenterPoints(state: GameState, mini: number): BoardPoint[] {
+  const localSize = ultimateLocalSize(state);
+  const offset = Math.floor(localSize / 2);
+  return [{ row: Math.floor(mini / localSize) * localSize + offset, column: (mini % localSize) * localSize + offset }];
+}
+
+function ultimateBoardIndex(state: GameState, row: number, column: number): number {
+  const localSize = ultimateLocalSize(state);
+  return Math.floor(row / localSize) * localSize + Math.floor(column / localSize);
+}
+
+function ultimateLocalIndex(state: GameState, row: number, column: number): number {
+  const localSize = ultimateLocalSize(state);
+  return (row % localSize) * localSize + (column % localSize);
+}
+
+function squareLines(size: number): number[][] {
+  const lines: number[][] = [];
+  for (let row = 0; row < size; row += 1) {
+    lines.push(Array.from({ length: size }, (_, column) => row * size + column));
+  }
+  for (let column = 0; column < size; column += 1) {
+    lines.push(Array.from({ length: size }, (_, row) => row * size + column));
+  }
+  lines.push
