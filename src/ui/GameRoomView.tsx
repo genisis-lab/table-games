@@ -73,7 +73,7 @@ export function GameRoomView({
   );
   const voteTarget = room.opponent === "friend" ? Math.max(1, connectedHumanPlayers.length) : 1;
   const isHost = currentPlayer?.mark === "p1";
-  const settingsLocked = !isHost || room.moveCount > 0;
+  const settingsLocked = !isHost;
   const rematchText = room.rematchRequests.length > 0 && room.opponent === "friend"
     ? `Rematch vote ${room.rematchRequests.length}/${voteTarget}`
     : "Rematch";
@@ -130,7 +130,7 @@ export function GameRoomView({
               className={gameId === room.gameId ? "rail-game active" : "rail-game"}
               type="button"
               disabled={settingsLocked}
-              title={settingsLocked ? "Host can switch games before the first move." : `Switch to ${getGameDefinition(gameId).name}`}
+              title={settingsLocked ? "Only the host can switch games." : `Switch to ${getGameDefinition(gameId).name}`}
               onClick={() => onSwitchGame(gameId)}
               key={gameId}
             >

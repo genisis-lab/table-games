@@ -479,7 +479,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (!canChangeRoomSettings(room, player)) {
-      this.send(ws, { type: "error", reason: "Only the host can change games before the first move." });
+      this.send(ws, { type: "error", reason: "Only the host can change games." });
       return;
     }
 
@@ -514,7 +514,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (!canChangeRoomSettings(room, player)) {
-      this.send(ws, { type: "error", reason: "Only the host can change the board before the first move." });
+      this.send(ws, { type: "error", reason: "Only the host can change the board." });
       return;
     }
 
@@ -542,7 +542,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (!canChangeRoomSettings(room, player)) {
-      this.send(ws, { type: "error", reason: "Only the host can change bot mode before the first move." });
+      this.send(ws, { type: "error", reason: "Only the host can change bot mode." });
       return;
     }
 
@@ -568,7 +568,8 @@ export class GameRoom extends DurableObject<Env> {
     const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
     if (!bot) return;
 
-    await sleep(BOT_MOVE_DELAY_MS);
+    const delayMs = room.gameId === "four-in-a-row" && room.botDifficulty === "ruthless" ? 80 : BOT_MOVE_DELAY_MS;
+    await sleep(delayMs);
 
     const move = chooseBotMove(room.game, bot.mark, room.botDifficulty);
     if (!move) return;
@@ -831,7 +832,7 @@ function hasAllHumanPlayerVotes(room: StoredRoom, votes: string[]): boolean {
 }
 
 function canChangeRoomSettings(room: StoredRoom, player: RoomPlayer): boolean {
-  return player.mark === "p1" && room.game.moveCount === 0;
+  return player.mark === "p1";
 }
 
 function cloneGameState(game: GameState): GameState {

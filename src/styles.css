@@ -3038,10 +3038,10 @@ button:disabled {
 
   .board-stage {
     min-height: auto;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: visible;
-    overscroll-behavior-x: contain;
-    padding-inline: 10px;
+    overscroll-behavior-x: none;
+    padding-inline: 8px;
   }
 
   .connect-board,
@@ -3067,41 +3067,17 @@ button:disabled {
   .board-stage.battleship,
   .board-stage.hex,
   .board-stage.nine-mens-morris {
-    place-items: center start;
+    place-items: center;
   }
 
-  .board-stage.gomoku .gomoku-board {
-    width: 560px;
-    max-width: none;
-  }
-
-  .board-stage.ultimate-tic-tac-toe .ultimate-board {
-    width: 520px;
-    max-width: none;
-  }
-
-  .board-stage.dots-and-boxes .dots-wrap {
-    width: 460px;
-    max-width: none;
-  }
-
-  .board-stage.dots-and-boxes.variant-party .dots-wrap {
-    width: 540px;
-  }
-
-  .board-stage.battleship .battleship-wrap {
-    width: 470px;
-    max-width: none;
-  }
-
-  .board-stage.hex .hex-board {
-    width: 510px;
-    max-width: none;
-  }
-
+  .board-stage.gomoku .gomoku-board,
+  .board-stage.ultimate-tic-tac-toe .ultimate-board,
+  .board-stage.dots-and-boxes .dots-wrap,
+  .board-stage.battleship .battleship-wrap,
+  .board-stage.hex .hex-board,
   .board-stage.nine-mens-morris .morris-board {
-    width: 430px;
-    max-width: none;
+    width: min(100%, calc(100vw - 32px));
+    max-width: 100%;
   }
 
   .dot-node::after {

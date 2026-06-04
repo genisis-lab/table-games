@@ -307,7 +307,7 @@ describe("GameRoomView", () => {
     expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
   });
 
-  it("locks game and board settings after the first move", () => {
+  it("keeps game and board settings available to the host after the first move", () => {
     const onSetBoardVariant = vi.fn();
     const onSwitchGame = vi.fn();
     render(
@@ -340,14 +340,14 @@ describe("GameRoomView", () => {
     );
 
     const wideButton = screen.getByRole("button", { name: "5x5 board" });
-    expect(wideButton).toBeDisabled();
+    expect(wideButton).not.toBeDisabled();
     fireEvent.click(wideButton);
-    expect(onSetBoardVariant).not.toHaveBeenCalled();
+    expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
 
     const gomokuRailButton = screen.getByRole("button", { name: "Gomoku" });
-    expect(gomokuRailButton).toBeDisabled();
+    expect(gomokuRailButton).not.toBeDisabled();
     fireEvent.click(gomokuRailButton);
-    expect(onSwitchGame).not.toHaveBeenCalled();
+    expect(onSwitchGame).toHaveBeenCalledWith("gomoku");
   });
 
   it("marks the most recent Tic Tac Toe move so it can animate without resizing the grid", () => {

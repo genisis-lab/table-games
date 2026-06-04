@@ -1358,14 +1358,16 @@ function chooseFourInARowMove(
   legalMoves: GameMove[],
   difficulty: BotDifficulty
 ): GameMove {
-  if (state.moveCount === 0) {
+  if (state.moveCount === 0 && difficulty !== "ruthless") {
     return legalMoves.find((move) => move.column === Math.floor(state.board[0].length / 2)) ?? orderedFourMoves(state, legalMoves)[0];
   }
+  if (state.moveCount === 0) {
+    return legalMoves.find((move) => move.column === 2) ?? legalMoves.find((move) => move.column === 4) ?? orderedFourMoves(state, legalMoves)[0];
+  }
   if (difficulty === "casual") return chooseBySearch(state, player, legalMoves, 2);
-  if (difficulty === "sharp") return chooseFourInARowBySearch(state, player, legalMoves, 5);
+  if (difficulty === "sharp") return chooseFourInARowBySearch(state, player, legalMoves, 4);
 
-  const depth = state.moveCount < 8 ? 8 : state.moveCount < 20 ? 9 : 10;
-  return chooseFourInARowBySearch(state, player, legalMoves, depth);
+  return chooseFourInARowBySearch(state, player, legalMoves, 6);
 }
 
 function chooseFourInARowBySearch(
@@ -1528,7 +1530,11 @@ function orderedFourMoves(state: GameState, moves: GameMove[]): GameMove[] {
 
 function fourColumnBias(state: GameState, move: GameMove): number {
   const center = (state.board[0].length - 1) / 2;
-  return 100 - Math.abs(move.column - center) * 14;
+  const landingRow = fourDropRow(state.board, move.column);
+  const supportBonus = landingRow === null ? -80 : state.board.length - landingRow;
+  const flankBonus = move.column === 2 || move.column === 4 ? 18 : 0;
+  const centerPenalty = move.column === Math.floor(center) ? -22 : 0;
+  return 100 - Math.abs(move.column - center) * 8 + supportBonus + flankBonus + centerPenalty;
 }
 
 function fourInARowCacheKey(state: GameState): string {

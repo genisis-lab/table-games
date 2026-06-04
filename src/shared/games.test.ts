@@ -512,8 +512,8 @@ describe("Bot move selection", () => {
     expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ column: 3 });
   });
 
-  it("opens ruthless Four in a Row from the center column", () => {
-    expect(chooseBotMove(createGameState("four-in-a-row"), "p1", "ruthless")).toEqual({ column: 3 });
+  it("opens ruthless Four in a Row from an attacking flank instead of the center", () => {
+    expect(chooseBotMove(createGameState("four-in-a-row"), "p1", "ruthless")).toEqual({ column: 2 });
   });
 
   it("extends a Gomoku four-stone line into a win", () => {

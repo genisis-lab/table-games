@@ -193,7 +193,7 @@ describe("GameRoom Durable Object", () => {
     expect(resized.room?.board[0]).toHaveLength(5);
   });
 
-  it("lets only the host change room settings before the first move", async () => {
+  it("lets only the host change room settings and allows host changes after moves", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
@@ -210,7 +210,7 @@ describe("GameRoom Durable Object", () => {
 
     guest.send(JSON.stringify({ type: "set_board_variant", variant: "wide" }));
     const blockedGuest = await waitForType(guest, "error");
-    expect(blockedGuest.reason).toBe("Only the host can change the board before the first move.");
+    expect(blockedGuest.reason).toBe("Only the host can change the board.");
 
     host.send(JSON.stringify({ type: "set_board_variant", variant: "wide" }));
     const resized = await waitForType(guest, "room_snapshot");
@@ -219,8 +219,10 @@ describe("GameRoom Durable Object", () => {
     host.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
     await waitForType(guest, "move_applied");
     host.send(JSON.stringify({ type: "set_board_variant", variant: "party" }));
-    const blockedAfterMove = await waitForType(host, "error");
-    expect(blockedAfterMove.reason).toBe("Only the host can change the board before the first move.");
+    const resizedAfterMove = await waitForType(guest, "room_snapshot");
+    expect(resizedAfterMove.room?.boardVariant).toBe("party");
+    expect(resizedAfterMove.room?.board).toHaveLength(7);
+    expect(resizedAfterMove.room?.board[0]).toHaveLength(7);
   });
 
   it("tracks move history and requires both friend players for undo", async () => {
