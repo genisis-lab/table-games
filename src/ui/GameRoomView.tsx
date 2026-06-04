@@ -1043,6 +1043,17 @@ function DartsBoard({
         </div>
       </div>
       <div className="dartboard">
+        <div className="dart-number-ring" aria-hidden="true">
+          {segments.map((segment, index) => {
+            const angle = index * 18 - 90;
+            const radius = 43;
+            const x = 50 + Math.cos((angle * Math.PI) / 180) * radius;
+            const y = 50 + Math.sin((angle * Math.PI) / 180) * radius;
+            return (
+              <span style={{ left: `${x}%`, top: `${y}%` }} key={segment}>{segment}</span>
+            );
+          })}
+        </div>
         {segments.map((segment, index) => (
           <div
             className="dart-slice"
@@ -1056,6 +1067,7 @@ function DartsBoard({
         ))}
         <button className="dart-bull outer" type="button" disabled={!canMove} onClick={() => onMove({ row: 25, column: 20 })}>25</button>
         <button className="dart-bull inner" type="button" disabled={!canMove} onClick={() => onMove({ row: 50, column: 21 })}>50</button>
+        <span className="dart-throw-line" aria-hidden="true" />
       </div>
       <div className="dart-throws">
         {meta.throws.length > 0 ? meta.throws.slice(-5).map((throwItem, index) => (
@@ -1090,6 +1102,13 @@ function WordHuntBoard({
   };
   return (
     <div className="word-hunt-table" role="group" aria-label="Word Hunt board">
+      <div className="word-hunt-header">
+        {(["p1", "p2"] as PlayerMark[]).map((mark) => (
+          <span className={room.turn === mark ? "active" : ""} key={mark}>
+            {playerNameFor(room.gameId, mark)} <strong>{meta.scores[mark]}</strong>
+          </span>
+        ))}
+      </div>
       <div className="word-grid" style={{ "--word-size": meta.size } as CSSProperties}>
         {meta.letters.flatMap((row, rowIndex) =>
           row.map((letter, columnIndex) => (
@@ -1110,13 +1129,6 @@ function WordHuntBoard({
         <button className="primary-button" type="submit" disabled={!canMove || word.trim().length < 2}>Play</button>
       </form>
       <div className="word-hunt-side">
-        <div className="word-scores">
-          {(["p1", "p2"] as PlayerMark[]).map((mark) => (
-            <span className={room.turn === mark ? "active" : ""} key={mark}>
-              {playerNameFor(room.gameId, mark)} {meta.scores[mark]}
-            </span>
-          ))}
-        </div>
         <div className="word-list" aria-label="Words found">
           {meta.words.map((target) => (
             <span className={found.has(target) ? "found" : ""} key={target}>
@@ -1282,8 +1294,16 @@ function DominoesBoard({
 function DominoFace({ tile }: { tile: DominoTile }) {
   return (
     <span className="domino-face" aria-hidden="true">
-      <span>{tile.left}</span>
-      <span>{tile.right}</span>
+      <DominoPips value={tile.left} />
+      <DominoPips value={tile.right} />
+    </span>
+  );
+}
+
+function DominoPips({ value }: { value: number }) {
+  return (
+    <span className={`domino-pips pips-${value}`}>
+      {Array.from({ length: value }).map((_, index) => <i key={index} />)}
     </span>
   );
 }
