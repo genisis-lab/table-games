@@ -1230,65 +1230,169 @@ function DominoesBoard({
   onMove: (move: GameMove) => void;
 }) {
   const meta = room.meta?.dominoes;
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setSelectedIndex(null);
+  }, [room.moveCount, currentMark, room.roomId]);
+
   if (!meta) return null;
   const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
-  const playable = new Set(
-    hand
-      .map((tile, index) => ({ tile, index }))
-      .filter(({ tile }) => meta.chain.length === 0 || tile.left === meta.openLeft || tile.right === meta.openLeft || tile.left === meta.openRight || tile.right === meta.openRight)
-      .map(({ index }) => index)
-  );
+  const legalSidesByIndex = new Map<number, Set<"left" | "right">>();
+  hand.forEach((tile, index) => {
+    const sides = legalDominoSides(meta, tile);
+    if (sides.size > 0) legalSidesByIndex.set(index, sides);
+  });
+  const selectedSides = selectedIndex === null ? new Set<"left" | "right">() : legalSidesByIndex.get(selectedIndex) ?? new Set();
+  const selectedTile = selectedIndex === null ? undefined : hand[selectedIndex];
+  const canPass = canMove && legalSidesByIndex.size === 0;
+  const teamMode = meta.gameMode !== "free-for-all";
+  const tableMode = teamMode ? "Partners" : "Free-for-all";
+
   return (
-    <div className="domino-table" role="group" aria-label="Dominoes table">
-      <div className="domino-seats">
-        {meta.playerOrder.map((mark) => {
-          const player = room.players.find((candidate) => candidate.mark === mark);
-          return (
-            <div className={`domino-seat ${mark} ${room.turn === mark && !room.winner ? "active" : ""}`} key={mark}>
-              <span>{player?.name ?? playerNameFor(room.gameId, mark)}</span>
-              <strong>{meta.handCounts[mark]} tiles</strong>
-              <small>{meta.scores[mark]} pips</small>
-            </div>
-          );
-        })}
+    <div className={`domino-table ${meta.gameMode}`} role="group" aria-label="Dominoes table">
+      <div className="domino-score-strip">
+        {teamMode ? (
+          <>
+            <span className="team-score northSouth">Team 1 + 3 <strong>{meta.teamScores.northSouth}</strong></span>
+            <span className="domino-target">Round {meta.round} · {tableMode} · first to {meta.targetScore}</span>
+            <span className="team-score eastWest">Team 2 + 4 <strong>{meta.teamScores.eastWest}</strong></span>
+          </>
+        ) : (
+          <>
+            {meta.playerOrder.map((mark) => (
+              <span className={room.turn === mark && !room.winner ? "team-score active" : "team-score"} key={mark}>
+                {playerNameFor(room.gameId, mark)} <strong>{meta.scores[mark]}</strong>
+              </span>
+            ))}
+            <span className="domino-target">Round {meta.round} · {tableMode} · first to {meta.targetScore}</span>
+          </>
+        )}
       </div>
-      <div className="domino-chain" aria-label="Domino chain">
-        {meta.chain.length > 0 ? meta.chain.map((tile, index) => (
-          <DominoFace tile={tile} key={`${tile.id}-${index}`} />
-        )) : <span className="domino-empty">Play any tile to start the chain.</span>}
-      </div>
-      <div className="domino-open-ends">
-        <span>Left {meta.openLeft ?? "-"}</span>
-        <span>Right {meta.openRight ?? "-"}</span>
-      </div>
-      <div className="domino-hand" aria-label="Your domino hand">
-        {hand.length > 0 ? hand.map((tile, index) => (
-          <div className={playable.has(index) ? "domino-hand-tile playable" : "domino-hand-tile"} key={tile.id}>
+
+      <div className="domino-arena">
+        <DominoSeat room={room} mark="p3" currentMark={currentMark} meta={meta} position="top" />
+        <DominoSeat room={room} mark="p2" currentMark={currentMark} meta={meta} position="left" />
+
+        <div className="domino-center">
+          <div className="domino-table-badge">
+            <strong>{room.winner ? "Match complete" : `${playerNameFor(room.gameId, room.turn)} to move`}</strong>
+            <span>{meta.drawMode === "draw" ? `${meta.deck.length} in boneyard` : "Block table"}</span>
+          </div>
+          <div className="domino-chain" aria-label="Domino chain">
+            {meta.chain.length > 0 ? meta.chain.map((tile, index) => (
+              <span className={`domino-chain-tile owner-${tile.owner}`} key={`${tile.id}-${index}`}>
+                <DominoFace tile={tile} />
+              </span>
+            )) : <span className="domino-empty">Select any tile to lead the round.</span>}
+          </div>
+          <div className="domino-open-ends">
             <button
               type="button"
-              disabled={!canMove || !playable.has(index)}
-              aria-label={`Play ${tile.left}-${tile.right} left`}
-              onClick={() => onMove({ column: index, edge: "h" })}
+              disabled={!canMove || !selectedTile || !selectedSides.has("left")}
+              onClick={() => selectedIndex !== null && onMove({ column: selectedIndex, edge: "h" })}
+            >
+              Left {meta.openLeft ?? "-"}
+            </button>
+            <button
+              type="button"
+              disabled={!canMove || !selectedTile || !selectedSides.has("right")}
+              onClick={() => selectedIndex !== null && onMove({ column: selectedIndex, edge: "v" })}
+            >
+              {meta.chain.length === 0 ? "Start chain" : `Right ${meta.openRight ?? "-"}`}
+            </button>
+          </div>
+        </div>
+
+        <DominoSeat room={room} mark="p4" currentMark={currentMark} meta={meta} position="right" />
+        <DominoSeat room={room} mark="p1" currentMark={currentMark} meta={meta} position="bottom" />
+      </div>
+
+      <div className="domino-hand-panel">
+        <div className="domino-hand-copy">
+          <strong>{currentMark ? "Your hand" : "Spectator view"}</strong>
+          <span>{selectedTile ? `Selected ${selectedTile.left}-${selectedTile.right}` : canMove ? "Pick a tile, then choose an open end." : "Opponent hands stay face down."}</span>
+        </div>
+        <div className="domino-hand" aria-label="Your domino hand">
+          {hand.length > 0 ? hand.map((tile, index) => {
+            const legalSides = legalSidesByIndex.get(index);
+            const playable = Boolean(legalSides);
+            const selected = selectedIndex === index;
+            return (
+            <button
+              className={`${playable ? "playable" : ""} ${selected ? "selected" : ""}`}
+              type="button"
+              disabled={!canMove || !playable}
+              aria-pressed={selected}
+              aria-label={`Select ${tile.left}-${tile.right}`}
+              onClick={() => setSelectedIndex(index)}
+              key={tile.id}
             >
               <DominoFace tile={tile} />
             </button>
-            <button
-              type="button"
-              disabled={!canMove || !playable.has(index)}
-              aria-label={`Play ${tile.left}-${tile.right} right`}
-              onClick={() => onMove({ column: index, edge: "v" })}
-            >
-              Right
-            </button>
-          </div>
-        )) : <span className="domino-empty">Hands are private.</span>}
-        <button className="ghost-button domino-pass" type="button" disabled={!canMove} onClick={() => onMove({ column: -1 })}>
-          Draw / pass
+          );}) : <span className="domino-empty">{currentMark ? "Your hand is empty." : "Hands are private. Watch tile counts around the table."}</span>}
+        </div>
+        <button className="ghost-button domino-pass" type="button" disabled={!canPass} onClick={() => onMove({ column: -1 })}>
+          {meta.drawMode === "draw" && meta.deck.length > 0 ? "Draw" : "Pass"}
         </button>
       </div>
-      {meta.lastAction ? <p className="domino-last">{meta.lastAction}</p> : null}
+      <div className="domino-log" aria-label="Domino log">
+        {meta.lastRound ? (
+          <p className="domino-round-summary">
+            Round {meta.lastRound.round}: {meta.lastRound.winner === "draw" ? "draw" : `${playerNameFor(room.gameId, meta.lastRound.winner)} scored ${meta.lastRound.points}`}
+          </p>
+        ) : null}
+        {(meta.log ?? []).slice(-3).map((item, index) => (
+          <p className="domino-last" key={`${item}-${index}`}>{item}</p>
+        ))}
+      </div>
     </div>
   );
+}
+
+function DominoSeat({
+  room,
+  mark,
+  currentMark,
+  meta,
+  position
+}: {
+  room: RoomSnapshot;
+  mark: PlayerMark;
+  currentMark?: PlayerMark;
+  meta: NonNullable<RoomSnapshot["meta"]>["dominoes"];
+  position: "top" | "left" | "right" | "bottom";
+}) {
+  if (!meta) return null;
+  const player = room.players.find((candidate) => candidate.mark === mark);
+  const isCurrent = mark === currentMark;
+  const active = room.turn === mark && !room.winner;
+  const team = mark === "p1" || mark === "p3" ? "northSouth" : "eastWest";
+  return (
+    <div className={`domino-seat ${position} ${mark} ${team} ${active ? "active" : ""} ${isCurrent ? "you" : ""}`}>
+      <span className="domino-avatar">{player?.isBot ? "BOT" : mark.toUpperCase()}</span>
+      <div>
+        <strong>{player?.name ?? playerNameFor(room.gameId, mark)}</strong>
+        <small>
+          {meta.handCounts[mark]} tiles
+          {isCurrent && meta.pipCounts[mark] ? ` · ${meta.pipCounts[mark]} pips` : ""}
+        </small>
+      </div>
+      {active ? <span className="domino-turn-dot" aria-label="Current turn" /> : null}
+    </div>
+  );
+}
+
+function legalDominoSides(meta: NonNullable<RoomSnapshot["meta"]>["dominoes"], tile: DominoTile): Set<"left" | "right"> {
+  const sides = new Set<"left" | "right">();
+  if (!meta) return sides;
+  if (meta.chain.length === 0) {
+    sides.add("right");
+    return sides;
+  }
+  if (tile.left === meta.openLeft || tile.right === meta.openLeft) sides.add("left");
+  if (tile.left === meta.openRight || tile.right === meta.openRight) sides.add("right");
+  return sides;
 }
 
 function DominoFace({ tile }: { tile: DominoTile }) {

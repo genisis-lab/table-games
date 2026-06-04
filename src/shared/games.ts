@@ -1,3 +1,15 @@
+import {
+  applyDominoIntent,
+  chooseDominoBotMove,
+  createDominoMeta as createDominoTableMeta,
+  getDominoLegalMoves,
+  maskDominoMetaForPlayer,
+  normalizeDominoMeta
+} from "../games/domino/engine";
+import type { DominoMeta, DominoPlayerMark, DominoTile } from "../games/domino/engine";
+
+export type { DominoMeta, DominoTile } from "../games/domino/engine";
+
 export type GameId =
   | "four-in-a-row"
   | "tic-tac-toe"
@@ -78,25 +90,6 @@ export interface CupPongMeta {
   cups: Record<PlayerMark, boolean[]>;
   made: Record<PlayerMark, number>;
   streak: Record<PlayerMark, number>;
-}
-
-export interface DominoTile {
-  id: string;
-  left: number;
-  right: number;
-}
-
-export interface DominoMeta {
-  deck: DominoTile[];
-  hands: Record<PlayerMark, DominoTile[]>;
-  handCounts: Record<PlayerMark, number>;
-  chain: DominoTile[];
-  openLeft: number | null;
-  openRight: number | null;
-  scores: Record<PlayerMark, number>;
-  passed: PlayerMark[];
-  playerOrder: PlayerMark[];
-  lastAction?: string;
 }
 
 export interface UltimateMeta {
@@ -453,7 +446,9 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
     { id: "party", label: "10 cups", detail: "full rack" }
   ],
   dominoes: [
-    { id: "classic", label: "4 seats", detail: "double-six draw" }
+    { id: "classic", label: "Teams 100", detail: "2v2 block dominoes" },
+    { id: "wide", label: "FFA 100", detail: "every seat for itself" },
+    { id: "party", label: "Teams 150", detail: "longer 2v2 match" }
   ],
   "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }],
   snake: [{ id: "classic", label: "Classic", detail: "solo chase" }],
@@ -854,7 +849,7 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
 
   if (gameId === "cup-pong") return { cupPong: createCupPongMeta(variant) };
 
-  if (gameId === "dominoes") return { dominoes: createDominoMeta() };
+  if (gameId === "dominoes") return { dominoes: createDominoTableMeta(variant) };
 
   return undefined;
 }
@@ -1340,75 +1335,19 @@ function applyDominoMove(state: GameState, player: PlayerMark, move: GameMove): 
   const clonedMeta = cloneMeta(state);
   const meta = clonedMeta.dominoes;
   if (!meta) return { ok: false, state, reason: "The domino rack is not ready." };
-  if (!meta.playerOrder.includes(player)) return { ok: false, state, reason: "That seat is not in this domino game." };
-
-  if (move.column === -1) {
-    const legal = getDominoMoves(state, player).filter((candidate) => candidate.column >= 0);
-    if (legal.length > 0) return { ok: false, state, reason: "You have a playable domino." };
-    const drawn = meta.deck.shift();
-    if (drawn) {
-      meta.hands[player].push(drawn);
-      syncDominoCounts(meta);
-      meta.lastAction = `${playerNameFor("dominoes", player)} drew`;
-      return {
-        ok: true,
-        point: { row: 0, column: -1 },
-        state: {
-          ...state,
-          turn: player,
-          winner: null,
-          winningLine: [],
-          moveCount: state.moveCount + 1,
-          meta: { ...clonedMeta, dominoes: meta }
-        }
-      };
-    }
-    addUniquePlayer(meta.passed, player);
-    const winner = meta.passed.length >= meta.playerOrder.length ? dominoScoreWinner(meta) : null;
-    return {
-      ok: true,
-      point: { row: 0, column: -1 },
-      state: {
-        ...state,
-        turn: winner ? player : nextDominoPlayer(meta, player),
-        winner,
-        winningLine: [],
-        moveCount: state.moveCount + 1,
-        meta: { ...clonedMeta, dominoes: meta }
-      }
-    };
-  }
-
-  const hand = meta.hands[player];
-  const tile = hand[move.column];
-  if (!tile) return { ok: false, state, reason: "Choose one of your dominoes." };
-  const side = move.edge === "h" ? "left" : "right";
-  const placement = orientDomino(tile, side, meta);
-  if (!placement) return { ok: false, state, reason: "Match one open end of the chain." };
-
-  hand.splice(move.column, 1);
-  if (placement.side === "left") {
-    meta.chain.unshift(placement.tile);
-  } else {
-    meta.chain.push(placement.tile);
-  }
-  meta.openLeft = meta.chain[0].left;
-  meta.openRight = meta.chain.at(-1)?.right ?? null;
-  meta.passed = [];
-  syncDominoCounts(meta);
-  meta.lastAction = `${playerNameFor("dominoes", player)} played ${tile.left}-${tile.right}`;
-  const winner = hand.length === 0 ? player : null;
+  const result = applyDominoIntent(meta, player as DominoPlayerMark, move);
+  if (!result.ok) return { ok: false, state, reason: result.reason };
 
   return {
     ok: true,
-    point: { row: placement.side === "left" ? 0 : 1, column: move.column },
+    point: result.point,
     state: {
       ...state,
-      turn: winner ? player : nextDominoPlayer(meta, player),
-      winner,
+      turn: result.nextTurn,
+      winner: result.winner,
       winningLine: [],
       moveCount: state.moveCount + 1,
-      meta: { ...clonedMeta, dominoes: meta }
+      meta: { ...clonedMeta, dominoes: result.meta }
     }
   };
 }
@@ -1679,18 +1618,12 @@ function getCupPongMoves(state: GameState, player: PlayerMark): GameMove[] {
 
 function getDominoMoves(state: GameState, player: PlayerMark): GameMove[] {
   const meta = state.meta?.dominoes;
-  if (!meta || !meta.playerOrder.includes(player)) return [];
-  const moves: GameMove[] = [];
-  meta.hands[player].forEach((tile, index) => {
-    if (meta.chain.length === 0) {
-      moves.push({ column: index, edge: "v" });
-      return;
-    }
-    if (tile.left === meta.openLeft || tile.right === meta.openLeft) moves.push({ column: index, edge: "h" });
-    if (tile.left === meta.openRight || tile.right === meta.openRight) moves.push({ column: index, edge: "v" });
-  });
-  if (moves.length === 0) moves.push({ column: -1 });
-  return moves;
+  if (!meta) return [];
+  const normalized = normalizeDominoMeta(meta);
+  const moves = getDominoLegalMoves(normalized, player as DominoPlayerMark);
+  return moves.length > 0
+    ? moves.map((move) => ({ column: move.column, edge: move.edge }))
+    : [{ column: -1 }];
 }
 
 function chooseLastCardMove(
@@ -1773,22 +1706,7 @@ function chooseDominoMove(
 ): GameMove {
   const meta = state.meta?.dominoes;
   if (!meta) return legalMoves[0];
-  if (legalMoves.length === 1 && legalMoves[0].column === -1) return legalMoves[0];
-  const scored = legalMoves
-    .filter((move) => move.column >= 0)
-    .map((move) => {
-      const tile = meta.hands[player][move.column];
-      const pipScore = tile ? tile.left + tile.right + (tile.left === tile.right ? 8 : 0) : 0;
-      const leaves = tile ? dominoFollowCount(meta.hands[player].filter((_, index) => index !== move.column), tile) : 0;
-      const sideScore = move.edge === "h" ? 2 : 0;
-      return {
-        move,
-        score: pipScore * (difficulty === "casual" ? 1 : 2) + leaves * 5 + sideScore
-      };
-    })
-    .sort((a, b) => b.score - a.score);
-  if (difficulty === "casual" && scored.length > 1) return scored[Math.floor(Math.random() * Math.min(3, scored.length))].move;
-  return scored[0]?.move ?? legalMoves[0];
+  return chooseDominoBotMove(normalizeDominoMeta(meta), player as DominoPlayerMark, legalMoves, difficulty);
 }
 
 function resolveTarget(state: GameState, move: GameMove): { ok: true; point: BoardPoint } | { ok: false; reason: string } {
@@ -2126,7 +2044,12 @@ function boardScore(state: GameState, bot: PlayerMark): number {
   }
   if (state.gameId === "dominoes") {
     const meta = state.meta?.dominoes;
-    return meta ? (42 - meta.scores[bot]) * 25 - meta.handCounts[bot] * 80 : 0;
+    if (!meta) return 0;
+    const normalized = normalizeDominoMeta(meta);
+    const opponentMarks = normalized.playerOrder.filter((mark) => mark !== bot);
+    const ownPips = normalized.pipCounts[bot];
+    const opponentPips = opponentMarks.reduce((sum, mark) => sum + normalized.pipCounts[mark], 0);
+    return (opponentPips - ownPips) * 25 - normalized.handCounts[bot] * 80 + normalized.scores[bot] * 12;
   }
   if (state.gameId === "four-in-a-row") return fourInARowScore(state, bot);
 
@@ -2431,28 +2354,6 @@ function createCupPongMeta(variant: BoardVariant): CupPongMeta {
   };
 }
 
-function createDominoMeta(): DominoMeta {
-  const deck = shuffleDominoes(makeDominoDeck());
-  const hands: Record<PlayerMark, DominoTile[]> = {
-    p1: deck.splice(0, 7),
-    p2: deck.splice(0, 7),
-    p3: deck.splice(0, 7),
-    p4: deck.splice(0, 7)
-  };
-  return syncDominoCounts({
-    deck,
-    hands,
-    handCounts: { p1: 7, p2: 7, p3: 7, p4: 7 },
-    chain: [],
-    openLeft: null,
-    openRight: null,
-    scores: emptyPlayerNumbers(),
-    passed: [],
-    playerOrder: PLAYER_ORDER,
-    lastAction: `${playerNameFor("dominoes", "p1")} starts`
-  });
-}
-
 function createLastCardMeta(): LastCardMeta {
   const deck = shuffleLastCards(makeLastCardDeck());
   const hands: Record<PlayerMark, LastCardCard[]> = {
@@ -2694,101 +2595,35 @@ function placeWordOnGrid(letters: string[][], word: string, random: () => number
   return false;
 }
 
-function makeDominoDeck(): DominoTile[] {
-  const deck: DominoTile[] = [];
-  for (let left = 0; left <= 6; left += 1) {
-    for (let right = left; right <= 6; right += 1) {
-      deck.push({ id: `${left}-${right}`, left, right });
-    }
-  }
-  return deck;
-}
-
-function shuffleDominoes(tiles: DominoTile[]): DominoTile[] {
-  const shuffled = [...tiles];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  return shuffled;
-}
-
-function syncDominoCounts(meta: DominoMeta): DominoMeta {
-  meta.handCounts = {
-    p1: meta.hands.p1.length,
-    p2: meta.hands.p2.length,
-    p3: meta.hands.p3.length,
-    p4: meta.hands.p4.length
-  };
-  meta.scores = {
-    p1: dominoPipSum(meta.hands.p1),
-    p2: dominoPipSum(meta.hands.p2),
-    p3: dominoPipSum(meta.hands.p3),
-    p4: dominoPipSum(meta.hands.p4)
-  };
-  return meta;
-}
-
-function orientDomino(tile: DominoTile, side: "left" | "right", meta: DominoMeta): { tile: DominoTile; side: "left" | "right" } | null {
-  if (meta.chain.length === 0) return { tile, side: "right" };
-  if (side === "left") {
-    if (tile.right === meta.openLeft) return { tile, side };
-    if (tile.left === meta.openLeft) return { tile: { ...tile, left: tile.right, right: tile.left }, side };
-    return null;
-  }
-  if (tile.left === meta.openRight) return { tile, side };
-  if (tile.right === meta.openRight) return { tile: { ...tile, left: tile.right, right: tile.left }, side };
-  return null;
-}
-
-function nextDominoPlayer(meta: DominoMeta, player: PlayerMark): PlayerMark {
-  const current = meta.playerOrder.indexOf(player);
-  return meta.playerOrder[(current + 1) % meta.playerOrder.length] ?? "p1";
-}
-
-function dominoScoreWinner(meta: DominoMeta): Winner {
-  syncDominoCounts(meta);
-  const ordered = [...meta.playerOrder].sort((a, b) => meta.scores[a] - meta.scores[b]);
-  return meta.scores[ordered[0]] === meta.scores[ordered[1]] ? "draw" : ordered[0];
-}
-
-function dominoPipSum(hand: DominoTile[]): number {
-  return hand.reduce((sum, tile) => sum + tile.left + tile.right, 0);
-}
-
-function dominoFollowCount(hand: DominoTile[], tile: DominoTile): number {
-  return hand.filter((candidate) =>
-    candidate.left === tile.left ||
-    candidate.left === tile.right ||
-    candidate.right === tile.left ||
-    candidate.right === tile.right
-  ).length;
-}
-
 function addUniquePlayer(values: PlayerMark[], value: PlayerMark): void {
   if (!values.includes(value)) values.push(value);
 }
 
 export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
-  if (!meta?.lastCard) return meta;
+  if (!meta?.lastCard && !meta?.dominoes) return meta;
 
   const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
-  const lastCard = next.lastCard!;
-  const counts = {
-    p1: meta.lastCard.handCounts?.p1 ?? meta.lastCard.hands.p1.length,
-    p2: meta.lastCard.handCounts?.p2 ?? meta.lastCard.hands.p2.length,
-    p3: meta.lastCard.handCounts?.p3 ?? meta.lastCard.hands.p3?.length ?? 0,
-    p4: meta.lastCard.handCounts?.p4 ?? meta.lastCard.hands.p4?.length ?? 0
-  };
-  lastCard.handCounts = counts;
-  lastCard.deckCount = meta.lastCard.deckCount ?? meta.lastCard.deck.length;
-  lastCard.deck = [];
-  lastCard.hands = {
-    p1: player === "p1" ? lastCard.hands.p1 : [],
-    p2: player === "p2" ? lastCard.hands.p2 : [],
-    p3: player === "p3" ? lastCard.hands.p3 ?? [] : [],
-    p4: player === "p4" ? lastCard.hands.p4 ?? [] : []
-  };
+  if (meta.lastCard && next.lastCard) {
+    const lastCard = next.lastCard;
+    const counts = {
+      p1: meta.lastCard.handCounts?.p1 ?? meta.lastCard.hands.p1.length,
+      p2: meta.lastCard.handCounts?.p2 ?? meta.lastCard.hands.p2.length,
+      p3: meta.lastCard.handCounts?.p3 ?? meta.lastCard.hands.p3?.length ?? 0,
+      p4: meta.lastCard.handCounts?.p4 ?? meta.lastCard.hands.p4?.length ?? 0
+    };
+    lastCard.handCounts = counts;
+    lastCard.deckCount = meta.lastCard.deckCount ?? meta.lastCard.deck.length;
+    lastCard.deck = [];
+    lastCard.hands = {
+      p1: player === "p1" ? lastCard.hands.p1 : [],
+      p2: player === "p2" ? lastCard.hands.p2 : [],
+      p3: player === "p3" ? lastCard.hands.p3 ?? [] : [],
+      p4: player === "p4" ? lastCard.hands.p4 ?? [] : []
+    };
+  }
+  if (meta.dominoes && next.dominoes) {
+    next.dominoes = maskDominoMetaForPlayer(normalizeDominoMeta(meta.dominoes), player as DominoPlayerMark | undefined);
+  }
   return next;
 }
 

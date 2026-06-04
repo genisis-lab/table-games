@@ -105,6 +105,75 @@ describe("GameRoomView", () => {
     expect(screen.getAllByText("🔥").length).toBeGreaterThan(1);
   });
 
+  it("renders the rebuilt Domino table and sends selected legal-end moves", () => {
+    const onMove = vi.fn();
+    const dominoRoom: RoomSnapshot = {
+      ...room,
+      gameId: "dominoes",
+      board: [[null]],
+      players: [
+        { guestToken: "red-token", name: "Ruby", mark: "p1", connected: true, joinedAt: 1 },
+        { guestToken: "bot-2", name: "Bot 2", mark: "p2", connected: true, joinedAt: 2, isBot: true },
+        { guestToken: "bot-3", name: "Bot 3", mark: "p3", connected: true, joinedAt: 3, isBot: true },
+        { guestToken: "bot-4", name: "Bot 4", mark: "p4", connected: true, joinedAt: 4, isBot: true }
+      ],
+      meta: {
+        dominoes: {
+          deck: [],
+          hands: {
+            p1: [{ id: "2-4", left: 2, right: 4 }, { id: "1-1", left: 1, right: 1 }],
+            p2: [],
+            p3: [],
+            p4: []
+          },
+          handCounts: { p1: 2, p2: 7, p3: 7, p4: 7 },
+          chain: [{ id: "4-6", left: 4, right: 6, owner: "p2", roundIndex: 0 }],
+          openLeft: 4,
+          openRight: 6,
+          scores: { p1: 0, p2: 0, p3: 0, p4: 0 },
+          pipCounts: { p1: 8, p2: 0, p3: 0, p4: 0 },
+          teamScores: { northSouth: 0, eastWest: 0 },
+          passed: [],
+          passedNumbers: { p1: [], p2: [], p3: [], p4: [] },
+          playerOrder: ["p1", "p2", "p3", "p4"],
+          round: 1,
+          targetScore: 100,
+          gameMode: "partnership",
+          drawMode: "block",
+          log: ["Seat 2 played 4-6"],
+          lastAction: "Seat 2 played 4-6"
+        }
+      }
+    };
+
+    render(
+      <GameRoomView
+        room={dominoRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Select 2-4" }));
+    fireEvent.click(screen.getByRole("button", { name: /left 4/i }));
+
+    expect(onMove).toHaveBeenCalledWith({ column: 0, edge: "h" });
+    expect(screen.getByText(/team 1 \+ 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 tiles · 8 pips/i)).toBeInTheDocument();
+  });
+
   it("keeps spectator reactions locked until the game is over", () => {
     const onReaction = vi.fn();
     const spectatorRoom: RoomSnapshot = {

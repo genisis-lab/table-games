@@ -3527,40 +3527,218 @@ button:disabled {
 
 .domino-table {
   display: grid;
-  grid-template-rows: auto minmax(170px, 1fr) auto auto;
-  gap: 14px;
-  padding: clamp(12px, 2vw, 22px);
+  grid-template-rows: auto minmax(310px, 1fr) auto auto;
+  gap: clamp(10px, 1.7vw, 16px);
+  padding: clamp(12px, 1.8vw, 20px);
   background:
-    radial-gradient(ellipse at 50% 48%, rgb(255 255 255 / 12%) 0 16%, transparent 17%),
-    linear-gradient(180deg, #285f52, #17463f);
+    radial-gradient(ellipse at 50% 45%, rgb(255 255 255 / 16%) 0 18%, transparent 19%),
+    radial-gradient(circle at 18% 16%, rgb(255 215 93 / 14%) 0 9%, transparent 10%),
+    linear-gradient(180deg, #225f51, #123f39);
+}
+
+.domino-score-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.team-score,
+.domino-target,
+.domino-table-badge,
+.domino-round-summary,
+.domino-last {
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper-strong);
+  color: var(--ink);
+  font-weight: 950;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.team-score,
+.domino-target {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.team-score strong {
+  font-size: 1.08rem;
+}
+
+.team-score.northSouth,
+.domino-seat.northSouth.active,
+.team-score.active {
+  background: var(--yellow);
+}
+
+.team-score.eastWest,
+.domino-seat.eastWest.active {
+  background: var(--mint);
+}
+
+.domino-target {
+  background: #fff8dc;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.domino-arena {
+  display: grid;
+  grid-template-columns: minmax(98px, 0.48fr) minmax(0, 1.8fr) minmax(98px, 0.48fr);
+  grid-template-rows: auto minmax(210px, 1fr) auto;
+  gap: clamp(8px, 1.4vw, 14px);
+  min-height: 320px;
 }
 
 .domino-seat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: rgb(255 253 247 / 88%);
+  box-shadow: 3px 4px 0 rgb(24 34 41 / 50%);
+}
+
+.domino-seat.top,
+.domino-seat.bottom {
+  grid-column: 2;
+  justify-self: center;
+  min-width: min(280px, 100%);
+}
+
+.domino-seat.left {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: center;
+}
+
+.domino-seat.right {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: center;
+}
+
+.domino-seat.bottom {
+  grid-row: 3;
+}
+
+.domino-seat.you {
+  outline: 3px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.domino-avatar {
   display: grid;
-  min-width: 116px;
-  border-radius: var(--radius);
+  flex: 0 0 auto;
+  place-items: center;
+  width: 36px;
+  aspect-ratio: 1;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: #1f2730;
+  color: #fffdf7;
+  font-size: 0.64rem;
+  font-weight: 950;
+}
+
+.domino-seat strong,
+.domino-seat small {
+  display: block;
+  line-height: 1.1;
+}
+
+.domino-seat strong {
+  overflow: hidden;
+  max-width: 136px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domino-seat small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.domino-turn-dot {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 10px;
+  aspect-ratio: 1;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--red);
+  animation: dominoPulse 1.2s ease-in-out infinite;
+}
+
+.domino-center {
+  display: grid;
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-rows: auto minmax(135px, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  padding: clamp(10px, 1.8vw, 16px);
+  border: 3px solid rgb(255 253 247 / 24%);
+  border-radius: 22px;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgb(255 253 247 / 13%) 0 28%, transparent 29%),
+    rgb(0 0 0 / 12%);
+}
+
+.domino-table-badge {
+  justify-self: center;
+  display: inline-grid;
+  gap: 2px;
+  padding: 7px 13px;
   text-align: center;
+}
+
+.domino-table-badge span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
 }
 
 .domino-chain {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
-  min-height: 150px;
-  padding: 16px;
-  border: 3px solid rgb(255 253 247 / 28%);
+  min-width: 0;
+  min-height: 142px;
+  padding: 14px;
+  border: 3px dashed rgb(255 253 247 / 34%);
   border-radius: 16px;
-  background: rgb(0 0 0 / 10%);
+  background: rgb(255 253 247 / 8%);
   overflow-x: auto;
+  scrollbar-color: var(--yellow) transparent;
+}
+
+.domino-chain-tile {
+  display: inline-flex;
+  animation: dominoDeal 180ms ease-out;
 }
 
 .domino-face {
   display: inline-grid;
   grid-template-columns: repeat(2, 1fr);
-  width: 84px;
-  min-width: 84px;
-  height: 42px;
+  width: 82px;
+  min-width: 82px;
+  height: 41px;
   border: 3px solid var(--ink);
   border-radius: 6px;
   background:
@@ -3617,39 +3795,92 @@ button:disabled {
 .pips-6 i:nth-child(5) { grid-area: 3 / 1; }
 .pips-6 i:nth-child(6) { grid-area: 3 / 3; }
 
+.domino-open-ends {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.domino-open-ends button {
+  min-width: 112px;
+  padding: 9px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--yellow);
+  font-weight: 950;
+  box-shadow: 2px 3px 0 var(--ink);
+}
+
+.domino-open-ends button:disabled {
+  background: rgb(255 253 247 / 42%);
+  color: rgb(24 34 41 / 55%);
+  box-shadow: none;
+}
+
+.domino-hand-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 3px solid rgb(255 253 247 / 22%);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 12%);
+}
+
+.domino-hand-copy {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #fffdf7;
+}
+
+.domino-hand-copy span {
+  color: rgb(255 253 247 / 76%);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
 .domino-hand {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 9px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 
-.domino-hand-tile {
-  display: grid;
-  justify-items: center;
-  gap: 5px;
-}
-
-.domino-hand-tile > button {
+.domino-hand > button {
+  padding: 0;
   border: 0;
   background: transparent;
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
-.domino-hand-tile > button:last-child {
-  padding: 5px 8px;
-  border: 2px solid var(--ink);
-  border-radius: 999px;
-  background: var(--paper-strong);
-  font-size: 0.72rem;
-  font-weight: 950;
+.domino-hand > button.playable {
+  cursor: pointer;
 }
 
-.domino-hand-tile:not(.playable) {
-  opacity: 0.46;
+.domino-hand > button:not(.playable) {
+  opacity: 0.36;
+}
+
+.domino-hand > button.selected {
+  transform: translateY(-8px);
+}
+
+.domino-hand > button.selected .domino-face {
+  box-shadow:
+    0 0 0 4px var(--yellow),
+    inset 0 3px 0 rgb(255 255 255 / 70%),
+    4px 7px 0 rgb(24 34 41 / 60%);
 }
 
 .domino-pass {
   align-self: center;
+  min-width: 92px;
 }
 
 .domino-empty {
@@ -3657,9 +3888,31 @@ button:disabled {
   font-weight: 950;
 }
 
+.domino-log {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+}
+
+.domino-round-summary,
 .domino-last {
-  justify-self: center;
   margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+@keyframes dominoDeal {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) rotate(-2deg);
+  }
+}
+
+@keyframes dominoPulse {
+  50% {
+    transform: scale(1.35);
+  }
 }
 
 @media (max-width: 1060px) {
@@ -3909,6 +4162,105 @@ button:disabled {
 
   .domino-chain {
     justify-content: flex-start;
+  }
+
+  .domino-table {
+    grid-template-rows: auto auto auto auto;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .domino-score-strip {
+    justify-content: flex-start;
+  }
+
+  .domino-arena {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto auto auto;
+    min-height: 0;
+  }
+
+  .domino-seat.top,
+  .domino-seat.bottom,
+  .domino-center {
+    grid-column: 1 / -1;
+  }
+
+  .domino-seat.top {
+    grid-row: 1;
+  }
+
+  .domino-center {
+    grid-row: 2;
+  }
+
+  .domino-seat.left,
+  .domino-seat.right {
+    grid-row: 3;
+    align-self: stretch;
+  }
+
+  .domino-seat.left {
+    grid-column: 1;
+  }
+
+  .domino-seat.right {
+    grid-column: 2;
+  }
+
+  .domino-seat.bottom {
+    grid-row: 4;
+  }
+
+  .domino-seat {
+    min-width: 0;
+    padding: 7px;
+  }
+
+  .domino-seat strong {
+    max-width: 92px;
+  }
+
+  .domino-center {
+    grid-template-rows: auto minmax(118px, auto) auto;
+    padding: 10px;
+  }
+
+  .domino-chain {
+    min-height: 118px;
+    padding: 10px;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    overflow-x: visible;
+  }
+
+  .domino-hand-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .domino-hand {
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
+
+  .domino-hand .domino-face {
+    width: clamp(60px, 19vw, 70px);
+    min-width: clamp(60px, 19vw, 70px);
+    height: clamp(30px, 9.5vw, 35px);
+  }
+
+  .domino-chain .domino-face {
+    width: clamp(62px, 18vw, 74px);
+    min-width: clamp(62px, 18vw, 74px);
+    height: clamp(31px, 9vw, 37px);
+  }
+
+  .domino-open-ends button {
+    min-width: 0;
+    flex: 1;
   }
 
   .last-card-center {

@@ -16,6 +16,13 @@ V1 includes:
 - Mancala
 - Hex
 - Nine Men's Morris
+- Uno
+- Darts
+- Word Hunt
+- Cup Pong
+- Dominoes
+- Flappy Bird
+- 2048
 - Invite links for friend rooms
 - Bot rooms with Casual, Sharp, and Ruthless modes
 - Live chat
@@ -30,6 +37,36 @@ V1 includes:
 npm install
 npm run dev
 ```
+
+Rooms use guest identity from local storage. No auth or database provider is wired in
+yet, so match history, leaderboards, admin tools, and saved profiles are future hooks
+rather than required environment variables.
+
+## Multiplayer
+
+Cloudflare Durable Objects own each room. The client sends intents such as join,
+make move, chat, reaction, rematch, game switch, board variant, bot difficulty, and
+bot-start toggles. The Durable Object validates turns and moves, stores room state,
+broadcasts snapshots over WebSockets, and masks private card/tile data per viewer.
+
+## Dominoes
+
+Dominoes is implemented as a pure engine under `src/games/domino/engine` and then
+adapted into the shared Table Sparks room shell.
+
+- Standard double-six set, four seats, seven tiles per player.
+- `Teams 100`: partnership mode with seats 1+3 vs 2+4.
+- `FFA 100`: free-for-all scoring.
+- `Teams 150`: longer partnership match.
+- Block table rules by default. Players may pass only when they have no legal tile.
+- Rounds score remaining opponent pips. A new round is dealt automatically until a
+  player/team reaches the target score.
+- Opponent hands and hidden pip counts are masked in snapshots. Viewers only see
+  their own tiles, public tile counts, public scores, board chain, logs, and round
+  summaries.
+- Bot modes map to the site modes: Casual plays the first legal tile, Sharp favors
+  high-pip reduction and simple blocking, and Ruthless also considers passed
+  numbers, next-player pressure, and partner-friendly ends.
 
 ## Verification
 

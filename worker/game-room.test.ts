@@ -22,8 +22,11 @@ type ServerMessage = {
         handCounts: { p1: number; p2: number; p3: number; p4: number };
       };
       dominoes?: {
+        deck?: unknown[];
         hands: { p1: unknown[]; p2: unknown[]; p3: unknown[]; p4: unknown[] };
         handCounts: { p1: number; p2: number; p3: number; p4: number };
+        pipCounts?: { p1: number; p2: number; p3: number; p4: number };
+        teamScores?: { northSouth: number; eastWest: number };
         playerOrder: string[];
       };
     };
@@ -154,6 +157,33 @@ describe("GameRoom Durable Object", () => {
       { name: "Spark Bot 4", mark: "p4", isBot: true }
     ]);
     expect(snapshot.room?.meta?.dominoes?.handCounts).toEqual({ p1: 7, p2: 7, p3: 7, p4: 7 });
+  });
+
+  it("masks Dominoes opponent hands and hidden pip counts in room snapshots", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "dominoes",
+        opponent: "bot"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+    const meta = snapshot.room?.meta?.dominoes;
+
+    expect(meta?.hands.p1).toHaveLength(7);
+    expect(meta?.hands.p2).toHaveLength(0);
+    expect(meta?.hands.p3).toHaveLength(0);
+    expect(meta?.hands.p4).toHaveLength(0);
+    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7, p3: 7, p4: 7 });
+    expect(meta?.pipCounts?.p1).toBeGreaterThan(0);
+    expect(meta?.pipCounts?.p2).toBe(0);
+    expect(meta?.deck).toHaveLength(0);
+    expect(meta?.teamScores).toEqual({ northSouth: 0, eastWest: 0 });
   });
 
   it("masks Uno opponent hands and draw-pile order in room snapshots", async () => {
