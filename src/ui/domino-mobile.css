@@ -1,10 +1,9 @@
 /*
  * Dominoes mobile board polish
  * ----------------------------
- * Fixes the confusing "wrapped grid" line of play on small screens by keeping
- * the played tiles as a single, connected, horizontally-scrolling chain, with
- * clearer open-end targets, better tile scaling, a scroll affordance, and
- * safe-area handling.
+ * Keeps dominoes readable on small screens by making the played line compact
+ * and visibly separate from the larger actionable hand tiles, with clearer
+ * open-end targets, better tile scaling, and safe-area handling.
  *
  * This file is imported AFTER styles.css (see main.tsx), so these rules win on
  * equal specificity. Selectors are also scoped (.board-stage.dominoes ...) so
@@ -96,7 +95,7 @@
   }
 }
 
-/* --- Mobile: keep it a single scrolling train, never a grid ----------- */
+/* --- Mobile: show all hand/table tiles without sideways page swipes ---- */
 @media (max-width: 760px) {
   .board-stage.dominoes {
     overflow-x: clip;
@@ -164,7 +163,7 @@
   }
 
   .board-stage.dominoes .domino-center {
-    grid-template-rows: auto auto minmax(78px, auto) auto;
+    grid-template-rows: auto auto minmax(72px, auto) auto;
     gap: 7px;
     padding: 9px;
     border-width: 2px;
@@ -184,45 +183,32 @@
   }
 
   .board-stage.dominoes .domino-center .domino-chain {
-    flex-flow: row nowrap !important; /* styles.css mobile wraps this into a grid */
+    flex-flow: row wrap !important;
     align-content: center;
-    justify-content: flex-start !important;
-    overflow-x: auto !important;
+    justify-content: center !important;
+    overflow-x: hidden !important;
     overflow-y: hidden !important;
-    gap: 0 !important;
-    min-height: 76px;
-    max-height: 90px;
-    padding: 9px 12px;
+    gap: 5px !important;
+    min-height: 72px;
+    max-height: none;
+    padding: 9px;
     border-width: 2px;
     border-style: solid;
     border-radius: 14px;
-    scroll-snap-type: x proximity;
-    /* Fade the edges so it's obvious the chain scrolls horizontally. */
-    -webkit-mask-image: linear-gradient(
-      90deg,
-      transparent 0,
-      #000 22px,
-      #000 calc(100% - 22px),
-      transparent 100%
-    );
-    mask-image: linear-gradient(
-      90deg,
-      transparent 0,
-      #000 22px,
-      #000 calc(100% - 22px),
-      transparent 100%
-    );
+    scroll-snap-type: none;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   .board-stage.dominoes .domino-center .domino-chain .domino-chain-tile {
     flex: 0 0 auto;
   }
 
-  /* Smaller than hand tiles so this reads as the table line, not your hand. */
+  /* Smaller than hand tiles so this reads as table history, not your hand. */
   .board-stage.dominoes .domino-center .domino-chain .domino-face {
-    width: clamp(48px, 14vw, 60px);
-    min-width: clamp(48px, 14vw, 60px);
-    height: clamp(24px, 7vw, 30px);
+    width: clamp(42px, 12.5vw, 54px);
+    min-width: clamp(42px, 12.5vw, 54px);
+    height: clamp(21px, 6.25vw, 27px);
     border-width: 2px;
   }
 
@@ -262,6 +248,8 @@
 
   .board-stage.dominoes .domino-hand-panel {
     gap: 8px;
+    max-width: 100%;
+    overflow-x: hidden;
     padding: 9px;
     border-width: 2px;
     border-radius: 14px;
@@ -281,20 +269,23 @@
 
   .board-stage.dominoes .domino-hand {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(64px, max-content));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     justify-content: center;
-    gap: 9px 10px;
-    overflow: visible !important;
+    gap: 8px;
+    max-width: 100%;
+    overflow: hidden !important;
   }
 
   .board-stage.dominoes .domino-hand > button {
     min-width: 0;
+    width: 100%;
   }
 
   .board-stage.dominoes .domino-hand .domino-face {
-    width: clamp(62px, 18vw, 72px);
-    min-width: clamp(62px, 18vw, 72px);
-    height: clamp(31px, 9vw, 36px);
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    aspect-ratio: 2;
   }
 
   .board-stage.dominoes .domino-pass {
