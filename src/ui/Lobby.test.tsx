@@ -12,9 +12,13 @@ describe("Lobby", () => {
     expect(screen.getByText("Tic Tac Toe")).toBeInTheDocument();
     expect(screen.getByText("Gomoku")).toBeInTheDocument();
     expect(screen.getByText("Flappy Bird")).toBeInTheDocument();
-    expect(screen.getByText("Snake")).toBeInTheDocument();
+    expect(screen.queryByText("Snake")).not.toBeInTheDocument();
     expect(screen.getByText("2048")).toBeInTheDocument();
     expect(screen.getByText("Uno")).toBeInTheDocument();
+    expect(screen.getByText("Darts")).toBeInTheDocument();
+    expect(screen.getByText("Word Hunt")).toBeInTheDocument();
+    expect(screen.getByText("Cup Pong")).toBeInTheDocument();
+    expect(screen.getByText("Dominoes")).toBeInTheDocument();
 
     const fourCard = screen.getByRole("article", { name: /four in a row game card/i });
     fireEvent.click(within(fourCard).getByRole("button", { name: /play four in a row against bot/i }));
@@ -45,13 +49,17 @@ describe("Lobby", () => {
       botDifficulty: "ruthless"
     });
 
-    const snakeCard = screen.getByRole("article", { name: /snake game card/i });
-    fireEvent.click(within(snakeCard).getByRole("button", { name: /play snake solo/i }));
-    expect(onCreateRoom).toHaveBeenCalledWith("snake", {
+    const dominoCard = screen.getByRole("article", { name: /dominoes game card/i });
+    fireEvent.click(within(dominoCard).getByRole("button", { name: /play dominoes against bot/i }));
+    expect(onCreateRoom).toHaveBeenCalledWith("dominoes", {
       opponent: "bot",
       botDifficulty: "ruthless"
     });
-    expect(within(snakeCard).queryByRole("button", { name: /invite friend to snake/i })).not.toBeInTheDocument();
+    fireEvent.click(within(dominoCard).getByRole("button", { name: /invite friend to dominoes/i }));
+    expect(onCreateRoom).toHaveBeenCalledWith("dominoes", {
+      opponent: "friend",
+      botDifficulty: "ruthless"
+    });
 
     const lastCard = screen.getByRole("article", { name: /uno game card/i });
     fireEvent.click(within(lastCard).getByRole("button", { name: /invite friend to uno/i }));
@@ -64,8 +72,8 @@ describe("Lobby", () => {
     expect(screen.queryByRole("article", { name: /four in a row game card/i })).not.toBeInTheDocument();
     expect(screen.getByRole("article", { name: /flappy bird game card/i })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Search games"), { target: { value: "snake" } });
-    expect(screen.getByRole("article", { name: /snake game card/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search games"), { target: { value: "word" } });
+    expect(screen.getByRole("article", { name: /word hunt game card/i })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: /flappy bird game card/i })).not.toBeInTheDocument();
   });
 });

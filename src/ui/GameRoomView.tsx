@@ -17,8 +17,8 @@ import {
   UsersRound
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
-import { GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame } from "../shared/games";
+import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
+import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting";
@@ -40,6 +40,7 @@ interface GameRoomViewProps {
   onSwitchGame: (gameId: GameId) => void;
   onSetBoardVariant: (variant: BoardVariant) => void;
   onSetBotDifficulty: (difficulty: BotDifficulty) => void;
+  onSetBotStarts?: (botStarts: boolean) => void;
 }
 
 export function GameRoomView({
@@ -57,7 +58,8 @@ export function GameRoomView({
   onClaimSeat,
   onSwitchGame,
   onSetBoardVariant,
-  onSetBotDifficulty
+  onSetBotDifficulty,
+  onSetBotStarts = () => undefined
 }: GameRoomViewProps) {
   const [message, setMessage] = useState("");
   const definition = getGameDefinition(room.gameId);
@@ -79,7 +81,7 @@ export function GameRoomView({
     : "Rematch";
   const openSeat = room.opponent === "friend" && (
     room.players.some((player) => !player.connected && !player.isBot) ||
-    room.players.filter((player) => !player.isBot).length < 2
+    room.players.filter((player) => !player.isBot).length < maxPlayersForGame(room.gameId)
   );
   const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
   const spectatorReactionsLocked = Boolean(currentSpectator && !room.winner);
@@ -92,10 +94,10 @@ export function GameRoomView({
     : room.winner
     ? room.winner === "draw"
       ? "Draw table"
-      : `${definition.playerNames[room.winner]} wins`
+      : `${playerNameFor(room.gameId, room.winner)} wins`
     : currentTurnPlayer?.isBot
       ? `${currentTurnPlayer.name} thinking`
-      : `${definition.playerNames[room.turn]} to move`;
+      : `${playerNameFor(room.gameId, room.turn)} to move`;
   const status = connectionStatus === "connected"
     ? gameplayStatus
     : connectionStatus === "reconnecting"
@@ -158,7 +160,7 @@ export function GameRoomView({
           <section className="game-over-banner" aria-label="Game over">
             <Sparkles size={20} />
             <strong>
-              {room.winner === "draw" ? "Draw table" : `${definition.playerNames[room.winner]} wins`}
+              {room.winner === "draw" ? "Draw table" : `${playerNameFor(room.gameId, room.winner)} wins`}
             </strong>
             <span>{room.winner === "draw" ? "Everybody gets the dramatic stare." : "The table has chosen a legend."}</span>
           </section>
@@ -225,7 +227,7 @@ export function GameRoomView({
               <small>{player.isBot ? "bot" : player.connected ? "live" : "reconnecting"}</small>
             </div>
           ))}
-          {currentPlayer ? <p className="seat-note">You are {definition.playerNames[currentPlayer.mark]}.</p> : null}
+          {currentPlayer ? <p className="seat-note">You are {playerNameFor(room.gameId, currentPlayer.mark)}.</p> : null}
         </section>
 
         {room.opponent === "bot" && !solo ? (
@@ -246,6 +248,17 @@ export function GameRoomView({
                 </button>
               ))}
             </div>
+            {canBotStart(room.gameId) ? (
+              <label className="bot-start-toggle">
+                <input
+                  type="checkbox"
+                  checked={room.botStarts}
+                  disabled={settingsLocked}
+                  onChange={(event) => onSetBotStarts(event.target.checked)}
+                />
+                <span>Bot starts</span>
+              </label>
+            ) : null}
           </section>
         ) : null}
 
@@ -375,6 +388,22 @@ function Board({
 
   if (room.gameId === "last-card") {
     return <LastCardBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+  }
+
+  if (room.gameId === "darts") {
+    return <DartsBoard room={room} canMove={canMove} onMove={onMove} />;
+  }
+
+  if (room.gameId === "word-hunt") {
+    return <WordHuntBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+  }
+
+  if (room.gameId === "cup-pong") {
+    return <CupPongBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
+  }
+
+  if (room.gameId === "dominoes") {
+    return <DominoesBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
   }
 
   if (room.gameId === "snake") {
@@ -741,6 +770,7 @@ function BattleshipBoard({
                 type="button"
                 aria-label={`Fire row ${rowIndex + 1}, column ${columnIndex + 1}`}
                 disabled={!canMove || Boolean(shot)}
+                style={{ gridRow: rowIndex + 1, gridColumn: columnIndex + 1 }}
                 onClick={() => onMove({ row: rowIndex, column: columnIndex })}
                 key={`${rowIndex}-${columnIndex}`}
               >
@@ -908,7 +938,6 @@ function LastCardBoard({
   const topCard = meta?.discard.at(-1);
   if (!meta || !topCard) return null;
 
-  const definition = getGameDefinition(room.gameId);
   const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
   const deckCount = meta.deckCount ?? meta.deck.length;
   const canDraw = canMove && (deckCount > 0 || meta.discard.length > 1);
@@ -920,7 +949,7 @@ function LastCardBoard({
           const player = room.players.find((candidate) => candidate.mark === mark);
           return (
             <div className={`last-card-player ${mark} ${room.turn === mark && !room.winner ? "active" : ""}`} key={mark}>
-              <span>{definition.playerNames[mark]}</span>
+              <span>{playerNameFor(room.gameId, mark)}</span>
               <strong>{meta.handCounts[mark]} cards</strong>
               <small>{player?.name ?? "Open seat"}</small>
             </div>
@@ -949,7 +978,7 @@ function LastCardBoard({
 
       <div className="last-card-event" aria-live="polite">
         {meta.lastDraw ? (
-          <span>{definition.playerNames[meta.lastDraw.player]} drew {meta.lastDraw.count}</span>
+          <span>{playerNameFor(room.gameId, meta.lastDraw.player)} drew {meta.lastDraw.count}</span>
         ) : meta.lastAction && lastCardIsWildAction(meta.lastAction) ? (
           <span>{lastCardRankLabel(meta.lastAction)} changed color to {lastCardColorName(meta.currentColor)}</span>
         ) : meta.lastAction && lastCardIsAction(meta.lastAction) ? (
@@ -984,6 +1013,278 @@ function LastCardBoard({
         )}
       </div>
     </div>
+  );
+}
+
+function DartsBoard({
+  room,
+  canMove,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.darts;
+  if (!meta) return null;
+  const segments = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+  return (
+    <div className="darts-table" role="group" aria-label="Darts board">
+      <div className="darts-scoreboard">
+        {(["p1", "p2"] as PlayerMark[]).map((mark) => (
+          <div className={room.turn === mark ? "active" : ""} key={mark}>
+            <span>{playerNameFor(room.gameId, mark)}</span>
+            <strong>{meta.scores[mark]}</strong>
+          </div>
+        ))}
+        <div>
+          <span>Darts left</span>
+          <strong>{meta.dartsLeft}</strong>
+        </div>
+      </div>
+      <div className="dartboard">
+        {segments.map((segment, index) => (
+          <div
+            className="dart-slice"
+            style={{ "--slice": index } as CSSProperties}
+            key={segment}
+          >
+            <button type="button" disabled={!canMove} aria-label={`Triple ${segment}`} onClick={() => onMove({ row: 3, column: index })}>T{segment}</button>
+            <button type="button" disabled={!canMove} aria-label={`Single ${segment}`} onClick={() => onMove({ row: 1, column: index })}>{segment}</button>
+            <button type="button" disabled={!canMove} aria-label={`Double ${segment}`} onClick={() => onMove({ row: 2, column: index })}>D{segment}</button>
+          </div>
+        ))}
+        <button className="dart-bull outer" type="button" disabled={!canMove} onClick={() => onMove({ row: 25, column: 20 })}>25</button>
+        <button className="dart-bull inner" type="button" disabled={!canMove} onClick={() => onMove({ row: 50, column: 21 })}>50</button>
+      </div>
+      <div className="dart-throws">
+        {meta.throws.length > 0 ? meta.throws.slice(-5).map((throwItem, index) => (
+          <span key={`${throwItem.player}-${throwItem.label}-${index}`}>{throwItem.label}</span>
+        )) : <span>Aim for the clean checkout.</span>}
+      </div>
+    </div>
+  );
+}
+
+function WordHuntBoard({
+  room,
+  canMove,
+  currentMark,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  onMove: (move: GameMove) => void;
+}) {
+  const [word, setWord] = useState("");
+  const meta = room.meta?.wordHunt;
+  if (!meta) return null;
+  const found = new Set((["p1", "p2", "p3", "p4"] as PlayerMark[]).flatMap((mark) => meta.found[mark] ?? []));
+  const submitWord = (event: FormEvent) => {
+    event.preventDefault();
+    const clean = word.trim().toUpperCase();
+    if (!clean) return;
+    onMove({ column: 0, word: clean });
+    setWord("");
+  };
+  return (
+    <div className="word-hunt-table" role="group" aria-label="Word Hunt board">
+      <div className="word-grid" style={{ "--word-size": meta.size } as CSSProperties}>
+        {meta.letters.flatMap((row, rowIndex) =>
+          row.map((letter, columnIndex) => (
+            <span key={`${rowIndex}-${columnIndex}`}>{letter}</span>
+          ))
+        )}
+      </div>
+      <form className="word-entry" onSubmit={submitWord}>
+        <label htmlFor="word-hunt-input">Word</label>
+        <input
+          id="word-hunt-input"
+          value={word}
+          disabled={!canMove}
+          autoCapitalize="characters"
+          onChange={(event) => setWord(event.target.value)}
+          placeholder={currentMark ? "TYPE WORD" : "WATCHING"}
+        />
+        <button className="primary-button" type="submit" disabled={!canMove || word.trim().length < 2}>Play</button>
+      </form>
+      <div className="word-hunt-side">
+        <div className="word-scores">
+          {(["p1", "p2"] as PlayerMark[]).map((mark) => (
+            <span className={room.turn === mark ? "active" : ""} key={mark}>
+              {playerNameFor(room.gameId, mark)} {meta.scores[mark]}
+            </span>
+          ))}
+        </div>
+        <div className="word-list" aria-label="Words found">
+          {meta.words.map((target) => (
+            <span className={found.has(target) ? "found" : ""} key={target}>
+              {found.has(target) ? target : "•".repeat(Math.min(6, target.length))}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CupPongBoard({
+  room,
+  canMove,
+  currentMark,
+  lastMove,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.cupPong;
+  if (!meta) return null;
+  const targetMark = currentMark ? (currentMark === "p1" ? "p2" : "p1") : room.turn === "p1" ? "p2" : "p1";
+  return (
+    <div className="cup-pong-table" role="group" aria-label="Cup Pong table">
+      <CupRack
+        label={playerNameFor(room.gameId, "p2")}
+        cups={meta.cups.p2}
+        active={targetMark === "p2"}
+        canMove={canMove && targetMark === "p2"}
+        lastMove={lastMove}
+        onMove={onMove}
+      />
+      <div className="cup-ball" aria-hidden="true" />
+      <CupRack
+        label={playerNameFor(room.gameId, "p1")}
+        cups={meta.cups.p1}
+        active={targetMark === "p1"}
+        canMove={canMove && targetMark === "p1"}
+        lastMove={lastMove}
+        onMove={onMove}
+      />
+      <div className="cup-pong-score">
+        <span>Blue made {meta.made.p1}</span>
+        <span>Red made {meta.made.p2}</span>
+      </div>
+    </div>
+  );
+}
+
+function CupRack({
+  label,
+  cups,
+  active,
+  canMove,
+  lastMove,
+  onMove
+}: {
+  label: string;
+  cups: boolean[];
+  active: boolean;
+  canMove: boolean;
+  lastMove: AppliedMove | null;
+  onMove: (move: GameMove) => void;
+}) {
+  return (
+    <div className={active ? "cup-rack active" : "cup-rack"} aria-label={label}>
+      <strong>{label}</strong>
+      <div className={`cup-rack-grid cups-${cups.length}`}>
+        {cups.map((live, index) => (
+          <button
+            className={`${live ? "live" : "gone"} ${lastMove?.column === index ? "last-move" : ""}`}
+            type="button"
+            disabled={!canMove || !live}
+            aria-label={`${label} cup ${index + 1}`}
+            onClick={() => onMove({ column: index })}
+            key={index}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DominoesBoard({
+  room,
+  canMove,
+  currentMark,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.dominoes;
+  if (!meta) return null;
+  const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
+  const playable = new Set(
+    hand
+      .map((tile, index) => ({ tile, index }))
+      .filter(({ tile }) => meta.chain.length === 0 || tile.left === meta.openLeft || tile.right === meta.openLeft || tile.left === meta.openRight || tile.right === meta.openRight)
+      .map(({ index }) => index)
+  );
+  return (
+    <div className="domino-table" role="group" aria-label="Dominoes table">
+      <div className="domino-seats">
+        {meta.playerOrder.map((mark) => {
+          const player = room.players.find((candidate) => candidate.mark === mark);
+          return (
+            <div className={`domino-seat ${mark} ${room.turn === mark && !room.winner ? "active" : ""}`} key={mark}>
+              <span>{player?.name ?? playerNameFor(room.gameId, mark)}</span>
+              <strong>{meta.handCounts[mark]} tiles</strong>
+              <small>{meta.scores[mark]} pips</small>
+            </div>
+          );
+        })}
+      </div>
+      <div className="domino-chain" aria-label="Domino chain">
+        {meta.chain.length > 0 ? meta.chain.map((tile, index) => (
+          <DominoFace tile={tile} key={`${tile.id}-${index}`} />
+        )) : <span className="domino-empty">Play any tile to start the chain.</span>}
+      </div>
+      <div className="domino-open-ends">
+        <span>Left {meta.openLeft ?? "-"}</span>
+        <span>Right {meta.openRight ?? "-"}</span>
+      </div>
+      <div className="domino-hand" aria-label="Your domino hand">
+        {hand.length > 0 ? hand.map((tile, index) => (
+          <div className={playable.has(index) ? "domino-hand-tile playable" : "domino-hand-tile"} key={tile.id}>
+            <button
+              type="button"
+              disabled={!canMove || !playable.has(index)}
+              aria-label={`Play ${tile.left}-${tile.right} left`}
+              onClick={() => onMove({ column: index, edge: "h" })}
+            >
+              <DominoFace tile={tile} />
+            </button>
+            <button
+              type="button"
+              disabled={!canMove || !playable.has(index)}
+              aria-label={`Play ${tile.left}-${tile.right} right`}
+              onClick={() => onMove({ column: index, edge: "v" })}
+            >
+              Right
+            </button>
+          </div>
+        )) : <span className="domino-empty">Hands are private.</span>}
+        <button className="ghost-button domino-pass" type="button" disabled={!canMove} onClick={() => onMove({ column: -1 })}>
+          Draw / pass
+        </button>
+      </div>
+      {meta.lastAction ? <p className="domino-last">{meta.lastAction}</p> : null}
+    </div>
+  );
+}
+
+function DominoFace({ tile }: { tile: DominoTile }) {
+  return (
+    <span className="domino-face" aria-hidden="true">
+      <span>{tile.left}</span>
+      <span>{tile.right}</span>
+    </span>
   );
 }
 
@@ -1903,6 +2204,10 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
   if (gameId === "last-card") return "Match the top card by color or rank. Skips and reverses bounce the turn, +2 and wild +4 make the other side draw.";
+  if (gameId === "darts") return "Take three throws per turn and race down to exactly zero.";
+  if (gameId === "word-hunt") return "Type hidden words from the letter grid. Longer words score more, and found words cannot be reused.";
+  if (gameId === "cup-pong") return "Pick an opponent cup to sink it. Clear the other rack before yours disappears.";
+  if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";
   if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
   if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
   if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
@@ -1913,6 +2218,10 @@ function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (difficulty === "casual") return "Loose and playful. It sees obvious wins but leaves room for drama.";
   if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
   if (gameId === "last-card") return "Uno hand shark. It saves wilds for awkward moments and keeps the table color uncomfortable.";
+  if (gameId === "darts") return "Checkout hunter. It aims for clean triples and avoids wasting darts near zero.";
+  if (gameId === "word-hunt") return "Fast word spotter. It reaches for longer finds when the board opens up.";
+  if (gameId === "cup-pong") return "Cup closer. It pressures the middle of the rack and finishes clean.";
+  if (gameId === "dominoes") return "Pip counter. It burns heavy tiles early and keeps matching numbers alive.";
   return gameId === "battleship"
     ? "Cold sonar mode. It hunts patterns and celebrates every hit internally."
     : "Ruthless table brain. It searches for wins, blocks traps, and prefers center control.";

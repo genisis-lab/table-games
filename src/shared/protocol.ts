@@ -64,6 +64,7 @@ export interface RoomSnapshot {
   boardVariant: BoardVariant;
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
+  botStarts: boolean;
   players: RoomPlayer[];
   spectators: RoomSpectator[];
   board: Cell[][];
@@ -91,7 +92,8 @@ export type ClientMessage =
   | { type: "claim_seat" }
   | { type: "switch_game"; gameId: GameId }
   | { type: "set_board_variant"; variant: BoardVariant }
-  | { type: "set_bot_difficulty"; difficulty: BotDifficulty };
+  | { type: "set_bot_difficulty"; difficulty: BotDifficulty }
+  | { type: "set_bot_starts"; botStarts: boolean };
 
 export type ServerMessage =
   | { type: "room_snapshot"; room: RoomSnapshot }

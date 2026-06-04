@@ -1,10 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   applyGameMove,
+  canBotStart,
   chooseBotMove,
   createGameState,
   getDefaultBoardVariant,
   getGameDefinition,
+  maxPlayersForGame,
   maskGameMetaForPlayer,
   isBoardVariantForGame,
   isBotDifficulty,
@@ -40,6 +42,7 @@ interface StoredRoom {
   boardVariant: BoardVariant;
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
+  botStarts: boolean;
   players: RoomPlayer[];
   spectators: RoomSpectator[];
   game: ReturnType<typeof createGameState>;
@@ -80,6 +83,7 @@ export class GameRoom extends DurableObject<Env> {
         gameId?: string;
         opponent?: string;
         botDifficulty?: string;
+        botStarts?: boolean;
         boardVariant?: string;
       };
       if (!body.gameId || !isGameId(body.gameId)) {
@@ -97,7 +101,8 @@ export class GameRoom extends DurableObject<Env> {
         body.gameId,
         opponent,
         body.botDifficulty && isBotDifficulty(body.botDifficulty) ? body.botDifficulty : "ruthless",
-        boardVariant
+        boardVariant,
+        Boolean(body.botStarts) && canBotStart(body.gameId)
       );
       await this.saveRoom(room);
       return Response.json(this.snapshot(room), { status: 201 });
@@ -172,6 +177,9 @@ export class GameRoom extends DurableObject<Env> {
         return;
       case "set_bot_difficulty":
         await this.handleSetBotDifficulty(ws, room, attachment.guestToken, clientMessage.difficulty);
+        return;
+      case "set_bot_starts":
+        await this.handleSetBotStarts(ws, room, attachment.guestToken, clientMessage.botStarts);
         return;
       default:
         this.send(ws, { type: "error", reason: "Unknown message type." });
@@ -491,10 +499,13 @@ export class GameRoom extends DurableObject<Env> {
     if (!supportsFriendMode(gameId)) {
       room.opponent = "bot";
       if (isSoloGame(gameId)) prepareSoloPlayers(room);
-      else ensureBotOpponent(room);
+      else ensureBotPlayers(room);
     }
 
     room.gameId = gameId;
+    room.botStarts = room.opponent === "bot" && room.botStarts && canBotStart(gameId);
+    trimPlayersForGame(room);
+    if (room.opponent === "bot" && !isSoloGame(gameId)) ensureBotPlayers(room);
     room.boardVariant = getDefaultBoardVariant(gameId);
     await this.resetGame(room);
     this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
@@ -562,6 +573,34 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
   }
 
+  private async handleSetBotStarts(
+    ws: WebSocket,
+    room: StoredRoom,
+    guestToken: string | undefined,
+    botStarts: boolean
+  ): Promise<void> {
+    const player = this.findPlayer(room, guestToken);
+    if (!player) {
+      this.send(ws, { type: "error", reason: "Only seated players can adjust the bot." });
+      return;
+    }
+
+    if (!canChangeRoomSettings(room, player)) {
+      this.send(ws, { type: "error", reason: "Only the host can change bot order." });
+      return;
+    }
+
+    if (room.opponent !== "bot" || !canBotStart(room.gameId)) {
+      this.send(ws, { type: "error", reason: "Bot starts is not available for this game." });
+      return;
+    }
+
+    room.botStarts = Boolean(botStarts);
+    await this.resetGame(room);
+    this.broadcastRoom(room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
+    await this.maybePlayBot(room);
+  }
+
   private async maybePlayBot(room: StoredRoom): Promise<void> {
     if (room.opponent !== "bot" || room.game.winner) return;
 
@@ -594,7 +633,7 @@ export class GameRoom extends DurableObject<Env> {
 
     if (room.game.winner) {
       this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
-    } else if (room.game.turn === bot.mark) {
+    } else if (room.players.some((player) => player.isBot && player.mark === room.game.turn)) {
       await this.maybePlayBot(room);
     }
   }
@@ -618,7 +657,8 @@ export class GameRoom extends DurableObject<Env> {
     gameId: GameId = "four-in-a-row",
     opponent: "friend" | "bot" = "friend",
     botDifficulty: BotDifficulty = "ruthless",
-    boardVariant: BoardVariant = getDefaultBoardVariant(gameId)
+    boardVariant: BoardVariant = getDefaultBoardVariant(gameId),
+    botStarts = false
   ): Promise<StoredRoom> {
     if (this.room) return this.ensureRoomShape(this.room, roomId);
 
@@ -635,7 +675,8 @@ export class GameRoom extends DurableObject<Env> {
       boardVariant,
       opponent,
       botDifficulty,
-      players: opponent === "bot" && !isSoloGame(gameId) ? [createBotPlayer(roomId, now)] : [],
+      botStarts: botStarts && canBotStart(gameId),
+      players: opponent === "bot" && !isSoloGame(gameId) ? createBotPlayers(roomId, now, gameId) : [],
       spectators: [],
       game: createGameState(gameId, boardVariant),
       gameHistory: [],
@@ -647,6 +688,10 @@ export class GameRoom extends DurableObject<Env> {
       createdAt: now,
       updatedAt: now
     };
+    if (this.room.botStarts && canBotStart(gameId)) {
+      const bot = this.room.players.find((player) => player.isBot);
+      if (bot) this.room.game.turn = bot.mark;
+    }
     return this.room;
   }
 
@@ -663,6 +708,7 @@ export class GameRoom extends DurableObject<Env> {
       boardVariant: room.boardVariant,
       opponent: room.opponent,
       botDifficulty: room.botDifficulty,
+      botStarts: room.botStarts,
       players: [...room.players].sort((a, b) => a.mark.localeCompare(b.mark)),
       spectators: room.spectators,
       board: room.game.board,
@@ -707,6 +753,7 @@ export class GameRoom extends DurableObject<Env> {
   private ensureRoomShape(room: StoredRoom, roomId: string): StoredRoom {
     room.opponent ??= "friend";
     room.botDifficulty ??= "ruthless";
+    room.botStarts ??= false;
     room.boardVariant ??= room.game?.boardVariant ?? getDefaultBoardVariant(room.gameId);
     room.game.boardVariant ??= room.boardVariant;
     room.gameHistory ??= [];
@@ -716,8 +763,8 @@ export class GameRoom extends DurableObject<Env> {
 
     if (isSoloGame(room.gameId)) {
       prepareSoloPlayers(room);
-    } else if (room.opponent === "bot" && !room.players.some((player) => player.isBot)) {
-      room.players.push(createBotPlayer(roomId, Date.now()));
+    } else if (room.opponent === "bot") {
+      ensureBotPlayers(room);
     }
 
     return room;
@@ -725,6 +772,10 @@ export class GameRoom extends DurableObject<Env> {
 
   private async resetGame(room: StoredRoom): Promise<void> {
     room.game = createGameState(room.gameId, room.boardVariant);
+    if (room.opponent === "bot" && room.botStarts && canBotStart(room.gameId)) {
+      const bot = room.players.find((player) => player.isBot);
+      if (bot) room.game.turn = bot.mark;
+    }
     room.gameHistory = [];
     room.moveHistory = [];
     room.undoRequests = [];
@@ -761,11 +812,18 @@ function cleanName(value: string): string {
   return trimmed || "Guest";
 }
 
-function createBotPlayer(roomId: string, joinedAt: number): RoomPlayer {
+function createBotPlayers(roomId: string, joinedAt: number, gameId: GameId): RoomPlayer[] {
+  const maxPlayers = maxPlayersForGame(gameId);
+  return Array.from({ length: Math.max(1, maxPlayers - 1) }, (_, index) =>
+    createBotPlayer(roomId, joinedAt, `p${index + 2}` as PlayerMark)
+  );
+}
+
+function createBotPlayer(roomId: string, joinedAt: number, mark: PlayerMark = "p2"): RoomPlayer {
   return {
-    guestToken: `bot:${roomId}`,
-    name: BOT_NAME,
-    mark: "p2",
+    guestToken: `bot:${roomId}:${mark}`,
+    name: mark === "p2" ? BOT_NAME : `${BOT_NAME} ${mark.slice(1)}`,
+    mark,
     connected: true,
     joinedAt,
     isBot: true
@@ -843,8 +901,9 @@ function availablePlayerMark(room: StoredRoom): PlayerMark | null {
   if (isSoloGame(room.gameId)) {
     return room.players.some((player) => !player.isBot) ? null : "p1";
   }
-  if (!room.players.some((player) => player.mark === "p1")) return "p1";
-  if (!room.players.some((player) => player.mark === "p2")) return "p2";
+  for (const mark of playerMarksForGame(room.gameId)) {
+    if (!room.players.some((player) => player.mark === mark)) return mark;
+  }
   return null;
 }
 
@@ -859,21 +918,41 @@ function prepareSoloPlayers(room: StoredRoom): void {
   }
 }
 
-function ensureBotOpponent(room: StoredRoom): void {
-  const displaced = room.players.find((roomPlayer) => roomPlayer.mark === "p2" && !roomPlayer.isBot);
-  if (displaced) {
-    room.spectators.push(toSpectator(displaced));
-    room.players = room.players.filter((roomPlayer) => roomPlayer !== displaced);
+function ensureBotPlayers(room: StoredRoom): void {
+  const marks = playerMarksForGame(room.gameId);
+  const now = Date.now();
+  for (const mark of marks) {
+    if (mark === "p1") continue;
+    const human = room.players.find((roomPlayer) => roomPlayer.mark === mark && !roomPlayer.isBot);
+    if (human) {
+      room.spectators.push(toSpectator(human));
+      room.players = room.players.filter((roomPlayer) => roomPlayer !== human);
+    }
+
+    const existingBot = room.players.find((roomPlayer) => roomPlayer.isBot && roomPlayer.mark === mark);
+    if (existingBot) {
+      existingBot.connected = true;
+      continue;
+    }
+
+    room.players.push(createBotPlayer(room.roomId, now, mark));
   }
 
-  const existingBot = room.players.find((roomPlayer) => roomPlayer.isBot);
-  if (existingBot) {
-    existingBot.mark = "p2";
-    existingBot.connected = true;
-    return;
-  }
+  room.players = room.players.filter((player) => !player.isBot || marks.includes(player.mark));
+}
 
-  room.players.push(createBotPlayer(room.roomId, Date.now()));
+function trimPlayersForGame(room: StoredRoom): void {
+  const allowed = new Set(playerMarksForGame(room.gameId));
+  const keep: RoomPlayer[] = [];
+  for (const player of room.players) {
+    if (allowed.has(player.mark)) keep.push(player);
+    else if (!player.isBot) room.spectators.push(toSpectator(player));
+  }
+  room.players = keep;
+}
+
+function playerMarksForGame(gameId: GameId): PlayerMark[] {
+  return (["p1", "p2", "p3", "p4"] as PlayerMark[]).slice(0, maxPlayersForGame(gameId));
 }
 
 function toSpectator(player: RoomPlayer): RoomSpectator {
@@ -890,5 +969,5 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function roomLabel(mark: PlayerMark, gameId: GameId): string {
-  return getGameDefinition(gameId).playerNames[mark];
+  return getGameDefinition(gameId).playerNames[mark] ?? mark.toUpperCase();
 }

@@ -18,8 +18,13 @@ type ServerMessage = {
         deck: unknown[];
         deckCount: number;
         discard: Array<{ color: string; rank: string }>;
-        hands: { p1: unknown[]; p2: unknown[] };
-        handCounts: { p1: number; p2: number };
+        hands: { p1: unknown[]; p2: unknown[]; p3: unknown[]; p4: unknown[] };
+        handCounts: { p1: number; p2: number; p3: number; p4: number };
+      };
+      dominoes?: {
+        hands: { p1: unknown[]; p2: unknown[]; p3: unknown[]; p4: unknown[] };
+        handCounts: { p1: number; p2: number; p3: number; p4: number };
+        playerOrder: string[];
       };
     };
     chat: Array<{ body: string }>;
@@ -126,6 +131,31 @@ describe("GameRoom Durable Object", () => {
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
   });
 
+  it("fills Dominoes bot rooms with four seats", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "dominoes",
+        opponent: "bot"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+
+    expect(snapshot.room?.players).toHaveLength(4);
+    expect(snapshot.room?.players).toMatchObject([
+      { name: "Ruby", mark: "p1" },
+      { name: "Spark Bot", mark: "p2", isBot: true },
+      { name: "Spark Bot 3", mark: "p3", isBot: true },
+      { name: "Spark Bot 4", mark: "p4", isBot: true }
+    ]);
+    expect(snapshot.room?.meta?.dominoes?.handCounts).toEqual({ p1: 7, p2: 7, p3: 7, p4: 7 });
+  });
+
   it("masks Uno opponent hands and draw-pile order in room snapshots", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
@@ -145,7 +175,7 @@ describe("GameRoom Durable Object", () => {
     expect(snapshot.room?.gameId).toBe("last-card");
     expect(meta?.hands.p1).toHaveLength(7);
     expect(meta?.hands.p2).toHaveLength(0);
-    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7 });
+    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7, p3: 0, p4: 0 });
     expect(meta?.deck).toHaveLength(0);
     expect(meta?.deckCount).toBeGreaterThan(70);
     expect(meta?.discard).toHaveLength(1);

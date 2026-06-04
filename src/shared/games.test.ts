@@ -246,14 +246,14 @@ describe("New game engines", () => {
       ["p1", "p2", "p1"],
       ["p2", "p1", "p2"]
     ];
-    dots.scores = { p1: 4, p2: 4 };
+    dots.scores = { p1: 4, p2: 4, p3: 0, p4: 0 };
     state.turn = "p1";
 
     const result = applyGameMove(state, "p1", { edge: "h", row: 0, column: 0 });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.meta?.dots?.scores).toEqual({ p1: 5, p2: 4 });
+    expect(result.state.meta?.dots?.scores).toEqual({ p1: 5, p2: 4, p3: 0, p4: 0 });
     expect(result.state.winner).toBe("p1");
   });
 
@@ -335,7 +335,7 @@ describe("New game engines", () => {
     });
     expect(meta?.hands.p1).toHaveLength(7);
     expect(meta?.hands.p2).toHaveLength(7);
-    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7 });
+    expect(meta?.handCounts).toEqual({ p1: 7, p2: 7, p3: 0, p4: 0 });
     expect(meta?.discard).toHaveLength(1);
     expect(Number(meta?.discard[0].rank)).not.toBeNaN();
   });
@@ -351,16 +351,18 @@ describe("New game engines", () => {
           { id: "blue-5-a", color: "blue", rank: "5" },
           { id: "green-2-a", color: "green", rank: "2" }
         ],
-        p2: [{ id: "yellow-9-a", color: "yellow", rank: "9" }]
+        p2: [{ id: "yellow-9-a", color: "yellow", rank: "9" }],
+        p3: [],
+        p4: []
       },
-      handCounts: { p1: 2, p2: 1 },
+      handCounts: { p1: 2, p2: 1, p3: 0, p4: 0 },
       currentColor: "red"
     };
 
     const next = play(state, "p1", { column: 0 });
 
     expect(next.meta?.lastCard?.discard.at(-1)).toMatchObject({ color: "blue", rank: "5" });
-    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 1 });
+    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 1, p3: 0, p4: 0 });
     expect(next.turn).toBe("p2");
   });
 
@@ -375,9 +377,11 @@ describe("New game engines", () => {
       discard: [{ id: "red-5-table", color: "red", rank: "5" }],
       hands: {
         p1: [{ id: "red-draw2-a", color: "red", rank: "draw2" }],
-        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }]
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }],
+        p3: [],
+        p4: []
       },
-      handCounts: { p1: 1, p2: 1 },
+      handCounts: { p1: 1, p2: 1, p3: 0, p4: 0 },
       currentColor: "red"
     };
 
@@ -405,9 +409,11 @@ describe("New game engines", () => {
           { id: "wild-four-a", color: "wild", rank: "wild4" },
           { id: "green-2-a", color: "green", rank: "2" }
         ],
-        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }]
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }],
+        p3: [],
+        p4: []
       },
-      handCounts: { p1: 2, p2: 1 },
+      handCounts: { p1: 2, p2: 1, p3: 0, p4: 0 },
       currentColor: "red"
     };
 
@@ -415,7 +421,7 @@ describe("New game engines", () => {
 
     expect(next.turn).toBe("p1");
     expect(next.meta?.lastCard?.currentColor).toBe("green");
-    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 5 });
+    expect(next.meta?.lastCard?.handCounts).toEqual({ p1: 1, p2: 5, p3: 0, p4: 0 });
     expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 4 });
   });
 
@@ -434,9 +440,11 @@ describe("New game engines", () => {
         p2: [
           { id: "red-draw2-a", color: "red", rank: "draw2" },
           { id: "blue-5-a", color: "blue", rank: "5" }
-        ]
+        ],
+        p3: [],
+        p4: []
       },
-      handCounts: { p1: 2, p2: 2 },
+      handCounts: { p1: 2, p2: 2, p3: 0, p4: 0 },
       currentColor: "red"
     };
 
@@ -487,6 +495,53 @@ describe("New game engines", () => {
 
     expect(state.meta?.morris?.placed.p1).toBe(3);
     expect(state.board.flat().filter((cell) => cell === "p2")).toHaveLength(1);
+  });
+});
+
+describe("New table games", () => {
+  it("scores Darts throws and advances after three darts", () => {
+    let state = createGameState("darts");
+    state = play(state, "p1", { row: 3, column: 0 });
+    state = play(state, "p1", { row: 3, column: 0 });
+    state = play(state, "p1", { row: 3, column: 0 });
+
+    expect(state.meta?.darts?.scores.p1).toBe(121);
+    expect(state.meta?.darts?.dartsLeft).toBe(3);
+    expect(state.turn).toBe("p2");
+  });
+
+  it("generates a unique Word Hunt board and rejects duplicate words", () => {
+    const state = createGameState("word-hunt");
+    const word = state.meta?.wordHunt?.words[0];
+    expect(word).toBeTruthy();
+
+    const next = play(state, "p1", { column: 0, word });
+    expect(next.meta?.wordHunt?.found.p1).toContain(word);
+    expect(next.meta?.wordHunt?.scores.p1).toBeGreaterThan(0);
+    expect(applyGameMove({ ...next, turn: "p2" }, "p2", { column: 0, word })).toMatchObject({
+      ok: false
+    });
+  });
+
+  it("removes targeted cups in Cup Pong", () => {
+    const state = play(createGameState("cup-pong"), "p1", { column: 0 });
+
+    expect(state.meta?.cupPong?.cups.p2[0]).toBe(false);
+    expect(state.meta?.cupPong?.made.p1).toBe(1);
+    expect(state.turn).toBe("p2");
+  });
+
+  it("deals four Dominoes hands and starts a matching chain", () => {
+    const state = createGameState("dominoes");
+    const firstTile = state.meta?.dominoes?.hands.p1[0];
+    expect(state.meta?.dominoes?.hands.p3).toHaveLength(7);
+    expect(firstTile).toBeTruthy();
+
+    const result = applyGameMove(state, "p1", { column: 0, edge: "v" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.meta?.dominoes?.chain[0]).toMatchObject(firstTile!);
+    expect(result.state.turn).toBe("p2");
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  canBotStart,
   isBoardVariantForGame,
   isBotDifficulty,
   isGameId,
@@ -30,6 +31,7 @@ export default {
           opponent?: string;
           botDifficulty?: string;
           boardVariant?: string;
+          botStarts?: boolean;
         };
         if (!body.gameId || !isGameId(body.gameId)) {
           return json({ error: "Unknown game." }, 400);
@@ -44,13 +46,14 @@ export default {
         const boardVariant = body.boardVariant && isBoardVariantForGame(body.gameId, body.boardVariant)
           ? body.boardVariant
           : undefined;
+        const botStarts = Boolean(body.botStarts) && canBotStart(body.gameId);
 
         const roomId = createRoomId();
         const stub = env.ROOMS.getByName(roomId);
         await stub.fetch(
           new Request(`https://room.internal/${roomId}/init`, {
             method: "POST",
-            body: JSON.stringify({ gameId: body.gameId, opponent, botDifficulty, boardVariant }),
+            body: JSON.stringify({ gameId: body.gameId, opponent, botDifficulty, boardVariant, botStarts }),
             headers: { "content-type": "application/json" }
           })
         );
@@ -62,6 +65,7 @@ export default {
             opponent,
             botDifficulty,
             boardVariant,
+            botStarts,
             invitePath: `/room/${roomId}`
           },
           201
@@ -119,11 +123,12 @@ export function createRoomRequest(
   gameId: GameId,
   opponent: "friend" | "bot" = "friend",
   botDifficulty: BotDifficulty = "ruthless",
-  boardVariant?: BoardVariant
+  boardVariant?: BoardVariant,
+  botStarts = false
 ): Request {
   return new Request("https://table-sparks.test/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ gameId, opponent, botDifficulty, boardVariant }),
+    body: JSON.stringify({ gameId, opponent, botDifficulty, boardVariant, botStarts }),
     headers: { "content-type": "application/json" }
   });
 }

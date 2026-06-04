@@ -11,6 +11,7 @@ const room: RoomSnapshot = {
   boardVariant: "classic",
   opponent: "friend",
   botDifficulty: "ruthless",
+  botStarts: false,
   players: [
     {
       guestToken: "red-token",
@@ -505,9 +506,11 @@ describe("GameRoomView", () => {
                   { id: "red-7-a", color: "red", rank: "7" },
                   { id: "green-2-a", color: "green", rank: "2" }
                 ],
-                p2: []
+                p2: [],
+                p3: [],
+                p4: []
               },
-              handCounts: { p1: 2, p2: 7 },
+              handCounts: { p1: 2, p2: 7, p3: 0, p4: 0 },
               currentColor: "red"
             }
           }
@@ -810,7 +813,7 @@ describe("GameRoomView", () => {
                 [false, false, false, false, false],
                 [false, false, false, false, false]
               ],
-              scores: { p1: 0, p2: 0 }
+              scores: { p1: 0, p2: 0, p3: 0, p4: 0 }
             }
           }
         }}
@@ -890,7 +893,10 @@ describe("GameRoomView", () => {
       />
     );
 
-    expect(screen.getByRole("img", { name: "Sunk Patrol Boat" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Sunk Patrol Boat" })).toHaveStyle({
+      gridRow: "2 / span 1",
+      gridColumn: "2 / span 2"
+    });
   });
 
   it("shows rules and move history without live undo controls", () => {

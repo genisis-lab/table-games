@@ -24,7 +24,10 @@ const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
     "checkers",
     "battleship",
     "mancala",
-    "last-card"
+    "last-card",
+    "darts",
+    "cup-pong",
+    "dominoes"
   ],
   Strategy: [
     "ultimate-tic-tac-toe",
@@ -34,10 +37,12 @@ const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
     "nine-mens-morris",
     "checkers",
     "mancala",
-    "last-card"
+    "last-card",
+    "word-hunt",
+    "dominoes"
   ],
-  Arcade: ["flappy-bird", "snake", "twenty-forty-eight"],
-  Solo: ["flappy-bird", "snake", "twenty-forty-eight"]
+  Arcade: ["flappy-bird", "cup-pong", "darts", "word-hunt", "twenty-forty-eight"],
+  Solo: ["flappy-bird", "twenty-forty-eight"]
 };
 
 export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
@@ -174,6 +179,7 @@ function badgesFor(gameId: GameId): string[] {
   if (isSoloGame(gameId)) return ["Solo"];
   const badges = supportsFriendMode(gameId) ? ["1v1", "Bot supported"] : ["Bot supported"];
   if (gameId === "battleship") badges.unshift("Solo captain");
+  if (gameId === "dominoes") badges.unshift("4 seats");
   return badges;
 }
 
@@ -189,8 +195,11 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
   if (gameId === "last-card") return "Uno-style color matching with skips, reverses, wilds, and draw cards.";
+  if (gameId === "darts") return "Throw for 301 or 501 on a bright pub dartboard.";
+  if (gameId === "word-hunt") return "Fresh letter grids every room, race the bot or a friend for hidden words.";
+  if (gameId === "cup-pong") return "Clear the rack cup by cup with a clean table-top bounce feel.";
+  if (gameId === "dominoes") return "A four-seat double-six table with bots ready to fill empty chairs.";
   if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
-  if (gameId === "snake") return "A fast little chase for food, clean turns, and just-one-more runs.";
   if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
   return "Place, slide, make mills, and knock pieces off the board.";
 }
@@ -304,11 +313,41 @@ function GamePreview({ gameId }: { gameId: GameId }) {
     );
   }
 
-  if (gameId === "snake") {
+  if (gameId === "darts") {
     return (
-      <div className="mini-snake" aria-hidden="true">
-        {Array.from({ length: 64 }).map((_, index) => (
-          <span className={index === 18 ? "food" : index >= 34 && index <= 38 ? "body" : ""} key={index} />
+      <div className="mini-darts" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <strong>50</strong>
+      </div>
+    );
+  }
+
+  if (gameId === "word-hunt") {
+    return (
+      <div className="mini-word" aria-hidden="true">
+        {"SPARKTABLEBOARDXX".split("").slice(0, 16).map((letter, index) => (
+          <span key={index}>{letter}</span>
+        ))}
+      </div>
+    );
+  }
+
+  if (gameId === "cup-pong") {
+    return (
+      <div className="mini-cup-pong" aria-hidden="true">
+        {Array.from({ length: 10 }).map((_, index) => <span key={index} />)}
+        <strong />
+      </div>
+    );
+  }
+
+  if (gameId === "dominoes") {
+    return (
+      <div className="mini-dominoes" aria-hidden="true">
+        {[[6, 6], [6, 4], [4, 2], [2, 5]].map(([left, right], index) => (
+          <span key={index}><b>{left}</b><b>{right}</b></span>
         ))}
       </div>
     );

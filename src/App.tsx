@@ -16,6 +16,7 @@ export interface CreateRoomOptions {
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
   boardVariant?: BoardVariant;
+  botStarts?: boolean;
 }
 
 export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
@@ -279,6 +280,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         onSwitchGame={(gameId) => send({ type: "switch_game", gameId })}
         onSetBoardVariant={(variant: BoardVariant) => send({ type: "set_board_variant", variant })}
         onSetBotDifficulty={(difficulty) => send({ type: "set_bot_difficulty", difficulty })}
+        onSetBotStarts={(botStarts) => send({ type: "set_bot_starts", botStarts })}
       />
     </>
   );
