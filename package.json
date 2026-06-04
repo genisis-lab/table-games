@@ -19,7 +19,8 @@
     "@vitejs/plugin-react": "^5.1.1",
     "lucide-react": "^0.555.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.10",
@@ -30,6 +31,7 @@
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.184.1",
     "jsdom": "^27.2.0",
     "playwright-core": "^1.60.0",
     "typescript": "^5.9.3",
