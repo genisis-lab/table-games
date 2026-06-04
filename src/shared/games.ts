@@ -10,6 +10,17 @@ import type { DominoMeta, DominoPlayerMark, DominoTile } from "../games/domino/e
 
 export type { DominoMeta, DominoTile } from "../games/domino/engine";
 
+import {
+  applyCupPongIntent,
+  chooseCupPongBotMove,
+  createCupPongMeta as createCupPongTableMeta,
+  getCupPongLegalMoves,
+  normalizeCupPongMeta
+} from "../games/cup-pong/engine";
+import type { CupPongMeta, CupPongPlayerMark } from "../games/cup-pong/engine";
+
+export type { CupPongMeta } from "../games/cup-pong/engine";
+
 export type GameId =
   | "four-in-a-row"
   | "tic-tac-toe"
@@ -48,6 +59,8 @@ export interface GameMove {
   toColumn?: number;
   edge?: "h" | "v";
   word?: string;
+  power?: number;
+  aim?: number;
 }
 
 export interface DotsMeta {
@@ -84,12 +97,6 @@ export interface WordHuntMeta {
   found: Record<PlayerMark, string[]>;
   scores: Record<PlayerMark, number>;
   seed: string;
-}
-
-export interface CupPongMeta {
-  cups: Record<PlayerMark, boolean[]>;
-  made: Record<PlayerMark, number>;
-  streak: Record<PlayerMark, number>;
 }
 
 export interface UltimateMeta {
@@ -847,7 +854,7 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
 
   if (gameId === "word-hunt") return { wordHunt: createWordHuntMeta(variant) };
 
-  if (gameId === "cup-pong") return { cupPong: createCupPongMeta(variant) };
+  if (gameId === "cup-pong") return { cupPong: createCupPongTableMeta(variant) };
 
   if (gameId === "dominoes") return { dominoes: createDominoTableMeta(variant) };
 
@@ -1301,32 +1308,19 @@ function applyCupPongMove(state: GameState, player: PlayerMark, move: GameMove):
   const clonedMeta = cloneMeta(state);
   const meta = clonedMeta.cupPong;
   if (!meta) return { ok: false, state, reason: "The cups are not ready." };
-
-  const opponent = otherPlayer(player);
-  const target = move.column;
-  if (!Number.isInteger(target) || target < 0 || target >= meta.cups[opponent].length) {
-    return { ok: false, state, reason: "Choose one of the opponent cups." };
-  }
-  if (!meta.cups[opponent][target]) {
-    return { ok: false, state, reason: "That cup is already gone." };
-  }
-
-  meta.cups[opponent][target] = false;
-  meta.made[player] += 1;
-  meta.streak[player] += 1;
-  meta.streak[opponent] = 0;
-  const winner = meta.cups[opponent].some(Boolean) ? null : player;
+  const result = applyCupPongIntent(normalizeCupPongMeta(meta), player as CupPongPlayerMark, move);
+  if (!result.ok) return { ok: false, state, reason: result.reason };
 
   return {
     ok: true,
-    point: { row: 0, column: target },
+    point: result.point,
     state: {
       ...state,
-      turn: winner ? player : opponent,
-      winner,
+      turn: result.winner ? player : (result.nextTurn as PlayerMark),
+      winner: result.winner as Winner,
       winningLine: [],
       moveCount: state.moveCount + 1,
-      meta: { ...clonedMeta, cupPong: meta }
+      meta: { ...clonedMeta, cupPong: result.meta }
     }
   };
 }
@@ -1609,11 +1603,7 @@ function getWordHuntMoves(state: GameState, player: PlayerMark): GameMove[] {
 function getCupPongMoves(state: GameState, player: PlayerMark): GameMove[] {
   const meta = state.meta?.cupPong;
   if (!meta) return [];
-  const opponent = otherPlayer(player);
-  return meta.cups[opponent]
-    .map((live, column) => ({ live, column }))
-    .filter((cup) => cup.live)
-    .map(({ column }) => ({ column }));
+  return getCupPongLegalMoves(normalizeCupPongMeta(meta), player as CupPongPlayerMark);
 }
 
 function getDominoMoves(state: GameState, player: PlayerMark): GameMove[] {
@@ -1691,11 +1681,9 @@ function chooseCupPongMove(
   legalMoves: GameMove[],
   difficulty: BotDifficulty
 ): GameMove {
-  const opponent = otherPlayer(player);
-  const cups = state.meta?.cupPong?.cups[opponent] ?? [];
-  if (difficulty === "casual") return legalMoves[Math.floor(Math.random() * legalMoves.length)];
-  const center = (cups.length - 1) / 2;
-  return [...legalMoves].sort((a, b) => Math.abs(a.column - center) - Math.abs(b.column - center))[0] ?? legalMoves[0];
+  const meta = state.meta?.cupPong;
+  if (!meta) return legalMoves[0];
+  return chooseCupPongBotMove(normalizeCupPongMeta(meta), player as CupPongPlayerMark, legalMoves, difficulty);
 }
 
 function chooseDominoMove(
@@ -2066,610 +2054,4 @@ function boardScore(state: GameState, bot: PlayerMark): number {
 
 function lineScore(state: GameState, player: PlayerMark): number {
   let score = 0;
-  for (let row = 0; row < state.board.length; row += 1) {
-    for (let column = 0; column < state.board[0].length; column += 1) {
-      if (state.board[row][column] !== player) continue;
-      for (const direction of DIRECTIONS) {
-        const before = { row: row - direction.row, column: column - direction.column };
-        if (cellAt(state.board, before) === player) continue;
-        let count = 0;
-        let cursor = { row, column };
-        while (cellAt(state.board, cursor) === player) {
-          count += 1;
-          cursor = { row: cursor.row + direction.row, column: cursor.column + direction.column };
-        }
-        const openEnds = Number(cellAt(state.board, before) === null) + Number(cellAt(state.board, cursor) === null);
-        score += sequenceScore(count, openEnds);
-      }
-    }
-  }
-  return score;
-}
-
-function sequenceScore(count: number, openEnds: number): number {
-  if (count >= 5) return 900_000;
-  if (count === 4) return openEnds === 2 ? 120_000 : 55_000;
-  if (count === 3) return openEnds === 2 ? 14_000 : 4_000;
-  if (count === 2) return openEnds === 2 ? 1_100 : 260;
-  return openEnds === 2 ? 40 : 10;
-}
-
-function centerScore(state: GameState, player: PlayerMark): number {
-  const centerRow = (state.board.length - 1) / 2;
-  const centerColumn = (state.board[0].length - 1) / 2;
-  return state.board.reduce((total, row, rowIndex) => total + row.reduce((rowTotal, cell, columnIndex) => {
-    if (cell !== player) return rowTotal;
-    const distance = Math.abs(rowIndex - centerRow) + Math.abs(columnIndex - centerColumn);
-    return rowTotal + Math.max(0, 24 - distance * 3);
-  }, 0), 0);
-}
-
-function pieceScore(state: GameState, player: PlayerMark): number {
-  let score = state.board.flat().filter((cell) => cell === player).length * 80;
-  if (state.gameId === "checkers") {
-    score += (state.meta?.checkers?.kings ?? []).filter((key) => cellAt(state.board, pointFromKey(key)) === player).length * 90;
-  }
-  return score;
-}
-
-function orderedMoves(state: GameState, moves: GameMove[]): GameMove[] {
-  const centerColumn = (state.board[0].length - 1) / 2;
-  const centerRow = (state.board.length - 1) / 2;
-  return [...moves].sort((a, b) => {
-    const aDistance = Math.abs((a.row ?? centerRow) - centerRow) + Math.abs(a.column - centerColumn);
-    const bDistance = Math.abs((b.row ?? centerRow) - centerRow) + Math.abs(b.column - centerColumn);
-    return aDistance - bDistance;
-  });
-}
-
-function reversiFlips(board: Cell[][], point: BoardPoint, player: PlayerMark): BoardPoint[] {
-  if (cellAt(board, point)) return [];
-  const opponent = otherPlayer(player);
-  const flips: BoardPoint[] = [];
-  for (const direction of [...DIRECTIONS, { row: -1, column: 0 }, { row: 0, column: -1 }, { row: -1, column: -1 }, { row: -1, column: 1 }]) {
-    const line: BoardPoint[] = [];
-    let cursor = { row: point.row + direction.row, column: point.column + direction.column };
-    while (cellAt(board, cursor) === opponent) {
-      line.push(cursor);
-      cursor = { row: cursor.row + direction.row, column: cursor.column + direction.column };
-    }
-    if (line.length > 0 && cellAt(board, cursor) === player) flips.push(...line);
-  }
-  return flips;
-}
-
-function completedBoxes(meta: DotsMeta, edge: "h" | "v", row: number, column: number): BoardPoint[] {
-  const boxes: BoardPoint[] = [];
-  const check = (boxRow: number, boxColumn: number) => {
-    if (boxRow < 0 || boxRow >= meta.size || boxColumn < 0 || boxColumn >= meta.size) return;
-    if (
-      meta.hEdges[boxRow][boxColumn] &&
-      meta.hEdges[boxRow + 1][boxColumn] &&
-      meta.vEdges[boxRow][boxColumn] &&
-      meta.vEdges[boxRow][boxColumn + 1]
-    ) {
-      boxes.push({ row: boxRow, column: boxColumn });
-    }
-  };
-  if (edge === "h") {
-    check(row - 1, column);
-    check(row, column);
-  } else {
-    check(row, column - 1);
-    check(row, column);
-  }
-  return boxes;
-}
-
-function countWinner(board: Cell[][]): Winner {
-  const p1 = board.flat().filter((cell) => cell === "p1").length;
-  const p2 = board.flat().filter((cell) => cell === "p2").length;
-  return p1 === p2 ? "draw" : p1 > p2 ? "p1" : "p2";
-}
-
-function hexPath(board: Cell[][], player: PlayerMark): BoardPoint[] {
-  const queue: BoardPoint[] = [];
-  const cameFrom = new Map<string, string | null>();
-  for (let i = 0; i < board.length; i += 1) {
-    const point = player === "p1" ? { row: i, column: 0 } : { row: 0, column: i };
-    if (cellAt(board, point) === player) {
-      queue.push(point);
-      cameFrom.set(keyOf(point), null);
-    }
-  }
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const point = queue[index];
-    const finished = player === "p1" ? point.column === board[0].length - 1 : point.row === board.length - 1;
-    if (finished) return rebuildPath(point, cameFrom);
-    for (const delta of HEX_DIRECTIONS) {
-      const next = { row: point.row + delta.row, column: point.column + delta.column };
-      const key = keyOf(next);
-      if (cellAt(board, next) === player && !cameFrom.has(key)) {
-        cameFrom.set(key, keyOf(point));
-        queue.push(next);
-      }
-    }
-  }
-  return [];
-}
-
-function rebuildPath(end: BoardPoint, cameFrom: Map<string, string | null>): BoardPoint[] {
-  const path: BoardPoint[] = [];
-  let cursor: string | null = keyOf(end);
-  while (cursor) {
-    path.push(pointFromKey(cursor));
-    cursor = cameFrom.get(cursor) ?? null;
-  }
-  return path.reverse();
-}
-
-function localCells(state: GameState, board: Cell[][], mini: number): Cell[] {
-  const localSize = ultimateLocalSize(state);
-  const startRow = Math.floor(mini / localSize) * localSize;
-  const startColumn = (mini % localSize) * localSize;
-  const cells: Cell[] = [];
-  for (let row = startRow; row < startRow + localSize; row += 1) {
-    for (let column = startColumn; column < startColumn + localSize; column += 1) cells.push(board[row][column]);
-  }
-  return cells;
-}
-
-function findLocalTicLine(state: GameState, board: Cell[][], mini: number, player: PlayerMark): BoardPoint[] {
-  const localSize = ultimateLocalSize(state);
-  const startRow = Math.floor(mini / localSize) * localSize;
-  const startColumn = (mini % localSize) * localSize;
-  const lines = squareLines(localSize);
-  for (const line of lines) {
-    const points = line.map((index) => ({ row: startRow + Math.floor(index / localSize), column: startColumn + (index % localSize) }));
-    if (points.every((point) => cellAt(board, point) === player)) return points;
-  }
-  return [];
-}
-
-function findMetaLine(localWinners: Winner[], player: PlayerMark, localSize: number): number[] {
-  const lines = squareLines(localSize);
-  return lines.find((line) => line.every((index) => localWinners[index] === player)) ?? [];
-}
-
-function miniCenterPoints(state: GameState, mini: number): BoardPoint[] {
-  const localSize = ultimateLocalSize(state);
-  const offset = Math.floor(localSize / 2);
-  return [{ row: Math.floor(mini / localSize) * localSize + offset, column: (mini % localSize) * localSize + offset }];
-}
-
-function ultimateBoardIndex(state: GameState, row: number, column: number): number {
-  const localSize = ultimateLocalSize(state);
-  return Math.floor(row / localSize) * localSize + Math.floor(column / localSize);
-}
-
-function ultimateLocalIndex(state: GameState, row: number, column: number): number {
-  const localSize = ultimateLocalSize(state);
-  return (row % localSize) * localSize + (column % localSize);
-}
-
-function squareLines(size: number): number[][] {
-  const lines: number[][] = [];
-  for (let row = 0; row < size; row += 1) {
-    lines.push(Array.from({ length: size }, (_, column) => row * size + column));
-  }
-  for (let column = 0; column < size; column += 1) {
-    lines.push(Array.from({ length: size }, (_, row) => row * size + column));
-  }
-  lines.push(Array.from({ length: size }, (_, index) => index * size + index));
-  lines.push(Array.from({ length: size }, (_, index) => index * size + (size - 1 - index)));
-  return lines;
-}
-
-function formsMill(board: Cell[][], point: BoardPoint, player: PlayerMark): boolean {
-  const key = keyOf(point);
-  return MORRIS_MILLS.some((mill) => mill.includes(key) && mill.every((millKey) => cellAt(board, pointFromKey(millKey)) === player));
-}
-
-function removeMorrisPiece(board: Cell[][], meta: MorrisMeta, opponent: PlayerMark): void {
-  const removable = [...MORRIS_POINTS]
-    .map(pointFromKey)
-    .filter((point) => cellAt(board, point) === opponent && !formsMill(board, point, opponent));
-  const fallback = [...MORRIS_POINTS].map(pointFromKey).filter((point) => cellAt(board, point) === opponent);
-  const target = removable[0] ?? fallback[0];
-  if (target) {
-    board[target.row][target.column] = null;
-    meta.removed[opponent] += 1;
-  }
-}
-
-function makeFleetShips(offset: number): BattleshipShip[] {
-  const ships: Array<Omit<BattleshipShip, "cells"> & { row: number; column: number }> = [
-    { id: "carrier", name: "Carrier", size: 5, orientation: "horizontal", row: 0, column: offset },
-    { id: "battleship", name: "Battleship", size: 4, orientation: "vertical", row: 2, column: offset + 1 },
-    { id: "cruiser", name: "Cruiser", size: 3, orientation: "horizontal", row: 5, column: offset },
-    { id: "submarine", name: "Submarine", size: 3, orientation: "vertical", row: 7, column: offset + 3 },
-    { id: "patrol", name: "Patrol Boat", size: 2, orientation: "horizontal", row: 9, column: offset }
-  ];
-
-  return ships.map(({ row, column, ...ship }) => ({
-    ...ship,
-    cells: Array.from({ length: ship.size }, (_, index) => ({
-      row: row + (ship.orientation === "vertical" ? index : 0),
-      column: (column + (ship.orientation === "horizontal" ? index : 0)) % 10
-    }))
-  }));
-}
-
-function flattenFleet(fleet: BattleshipShip[]): BattleshipShot[] {
-  return fleet.flatMap((ship) => ship.cells);
-}
-
-function createDartsMeta(variant: BoardVariant): DartsMeta {
-  const targetScore = variant === "wide" ? 501 : 301;
-  return {
-    targetScore,
-    scores: { p1: targetScore, p2: targetScore, p3: targetScore, p4: targetScore },
-    dartsLeft: 3,
-    turnScore: 0,
-    throws: []
-  };
-}
-
-function createWordHuntMeta(variant: BoardVariant): WordHuntMeta {
-  const size = variant === "wide" ? 5 : 4;
-  const seed = Math.random().toString(36).slice(2, 10);
-  const random = seededRandom(seed);
-  const candidates = shuffleWithRandom(WORD_HUNT_BANK.filter((word) => word.length <= size), random)
-    .slice(0, size === 5 ? 12 : 9);
-  const letters = Array.from({ length: size }, () => Array.from({ length: size }, () => ""));
-  const words: string[] = [];
-  for (const word of candidates) {
-    if (placeWordOnGrid(letters, word, random)) words.push(word);
-  }
-  const alphabet = "EEEEAAAARRRIIOOTTTNNSSLLCCUUDDPPMMGGHHBBFFYYKWVXZ";
-  for (let row = 0; row < size; row += 1) {
-    for (let column = 0; column < size; column += 1) {
-      if (!letters[row][column]) {
-        letters[row][column] = alphabet[Math.floor(random() * alphabet.length)];
-      }
-    }
-  }
-  return {
-    size,
-    letters,
-    words,
-    found: emptyPlayerStringLists(),
-    scores: emptyPlayerNumbers(),
-    seed
-  };
-}
-
-function createCupPongMeta(variant: BoardVariant): CupPongMeta {
-  const cupCount = variant === "party" ? 10 : 6;
-  return {
-    cups: {
-      p1: Array.from({ length: cupCount }, () => true),
-      p2: Array.from({ length: cupCount }, () => true),
-      p3: [],
-      p4: []
-    },
-    made: emptyPlayerNumbers(),
-    streak: emptyPlayerNumbers()
-  };
-}
-
-function createLastCardMeta(): LastCardMeta {
-  const deck = shuffleLastCards(makeLastCardDeck());
-  const hands: Record<PlayerMark, LastCardCard[]> = {
-    p1: deck.splice(0, LAST_CARD_HAND_SIZE),
-    p2: deck.splice(0, LAST_CARD_HAND_SIZE),
-    p3: [],
-    p4: []
-  };
-  const firstCardIndex = deck.findIndex((card) => LAST_CARD_NUMBER_RANKS.includes(card.rank));
-  const [firstCard] = deck.splice(firstCardIndex >= 0 ? firstCardIndex : 0, 1);
-  const meta: LastCardMeta = {
-    deck,
-    deckCount: deck.length,
-    discard: [firstCard],
-    hands,
-    handCounts: { p1: hands.p1.length, p2: hands.p2.length, p3: 0, p4: 0 },
-    currentColor: firstCard.color === "wild" ? "red" : firstCard.color
-  };
-  return syncLastCardHandCounts(meta);
-}
-
-function makeLastCardDeck(): LastCardCard[] {
-  const deck: LastCardCard[] = [];
-  for (const color of LAST_CARD_COLORS) {
-    deck.push({ id: `${color}-0-a`, color, rank: "0" });
-    for (const rank of LAST_CARD_NUMBER_RANKS.slice(1)) {
-      deck.push({ id: `${color}-${rank}-a`, color, rank });
-      deck.push({ id: `${color}-${rank}-b`, color, rank });
-    }
-    for (const rank of LAST_CARD_ACTION_RANKS) {
-      deck.push({ id: `${color}-${rank}-a`, color, rank });
-      deck.push({ id: `${color}-${rank}-b`, color, rank });
-    }
-  }
-  for (let index = 0; index < 4; index += 1) {
-    deck.push({ id: `wild-wild-${index}`, color: "wild", rank: LAST_CARD_WILD_RANKS[0] });
-    deck.push({ id: `wild-wild4-${index}`, color: "wild", rank: LAST_CARD_WILD_RANKS[1] });
-  }
-  return deck;
-}
-
-function shuffleLastCards(cards: LastCardCard[]): LastCardCard[] {
-  const shuffled = [...cards];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  return shuffled;
-}
-
-function lastCardTop(meta: LastCardMeta): LastCardCard | undefined {
-  return meta.discard.at(-1);
-}
-
-function isLastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardActiveColor): boolean {
-  return card.color === "wild" || card.color === currentColor || card.rank === top.rank;
-}
-
-function getPlayableLastCardIndexes(meta: LastCardMeta, player: PlayerMark): number[] {
-  const top = lastCardTop(meta);
-  if (!top) return [];
-  return meta.hands[player]
-    .map((card, index) => ({ card, index }))
-    .filter(({ card }) => isLastCardPlayable(card, top, meta.currentColor))
-    .map(({ index }) => index);
-}
-
-function canDrawLastCard(meta: LastCardMeta): boolean {
-  return meta.deck.length > 0 || meta.discard.length > 1;
-}
-
-function drawLastCards(meta: LastCardMeta, player: PlayerMark, count: number): number {
-  let drawn = 0;
-  while (drawn < count) {
-    if (meta.deck.length === 0) reshuffleLastCards(meta);
-    const card = meta.deck.pop();
-    if (!card) break;
-    meta.hands[player].push(card);
-    drawn += 1;
-  }
-  syncLastCardHandCounts(meta);
-  return drawn;
-}
-
-function reshuffleLastCards(meta: LastCardMeta): void {
-  const top = lastCardTop(meta);
-  if (!top || meta.discard.length <= 1) return;
-  meta.deck = shuffleLastCards(meta.discard.slice(0, -1));
-  meta.discard = [top];
-}
-
-function syncLastCardHandCounts(meta: LastCardMeta): LastCardMeta {
-  meta.handCounts = {
-    p1: meta.hands.p1.length,
-    p2: meta.hands.p2.length,
-    p3: meta.hands.p3?.length ?? 0,
-    p4: meta.hands.p4?.length ?? 0
-  };
-  meta.deckCount = meta.deck.length;
-  return meta;
-}
-
-function lastCardMoveScore(
-  meta: LastCardMeta,
-  player: PlayerMark,
-  move: GameMove,
-  difficulty: BotDifficulty
-): number {
-  const card = meta.hands[player][move.column];
-  if (!card) return Number.NEGATIVE_INFINITY;
-
-  const opponent = otherPlayer(player);
-  const remainingHand = meta.hands[player].filter((_, index) => index !== move.column);
-  const sameColorLeft = card.color === "wild"
-    ? bestLastCardColorCount(remainingHand)
-    : remainingHand.filter((candidate) => candidate.color === card.color).length;
-  const sameRankLeft = remainingHand.filter((candidate) => candidate.rank === card.rank).length;
-  const opponentPressure = Math.max(0, 4 - meta.hands[opponent].length) * 18;
-  const actionScore = card.rank === "wild4"
-    ? 138 + opponentPressure
-    : card.rank === "draw2"
-      ? 110 + opponentPressure
-      : card.rank === "skip" || card.rank === "reverse"
-        ? 72 + opponentPressure
-        : card.rank === "wild"
-          ? 44
-          : 0;
-
-  return (
-    actionScore +
-    sameColorLeft * (difficulty === "casual" ? 10 : 18) +
-    sameRankLeft * 8 +
-    lastCardRankScore(card.rank) +
-    (card.color === meta.currentColor ? 9 : card.color === "wild" ? 13 : 0) -
-    remainingHand.length * 2
-  );
-}
-
-function lastCardRankScore(rank: LastCardRank): number {
-  if (rank === "wild4") return 32;
-  if (rank === "draw2") return 24;
-  if (rank === "skip" || rank === "reverse") return 18;
-  if (rank === "wild") return 16;
-  return Number(rank);
-}
-
-function chooseLastCardColor(hand: LastCardCard[]): LastCardActiveColor {
-  return LAST_CARD_COLORS
-    .map((color) => ({
-      color,
-      count: hand.filter((card) => card.color === color).length
-    }))
-    .sort((a, b) => b.count - a.count)[0].color;
-}
-
-function bestLastCardColorCount(hand: LastCardCard[]): number {
-  return Math.max(0, ...LAST_CARD_COLORS.map((color) => hand.filter((card) => card.color === color).length));
-}
-
-function emptyPlayerNumbers(value = 0): Record<PlayerMark, number> {
-  return { p1: value, p2: value, p3: value, p4: value };
-}
-
-function emptyPlayerStringLists(): Record<PlayerMark, string[]> {
-  return { p1: [], p2: [], p3: [], p4: [] };
-}
-
-function dartsTargetFromMove(move: GameMove): DartsTarget | null {
-  if (move.column === DARTS_BULL_INDEX) return { label: "Bull", value: 25, multiplier: 1 };
-  if (move.column === DARTS_BULL_INDEX + 1) return { label: "Double Bull", value: 50, multiplier: 2 };
-  const segment = DARTS_SEGMENTS[move.column];
-  const multiplier = move.row === 3 ? 3 : move.row === 2 ? 2 : 1;
-  if (!segment || !Number.isInteger(multiplier)) return null;
-  return {
-    label: `${multiplier === 3 ? "T" : multiplier === 2 ? "D" : "S"}${segment}`,
-    value: segment * multiplier,
-    multiplier
-  };
-}
-
-function cleanWord(value: string | undefined): string {
-  return String(value ?? "").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 16);
-}
-
-function wordScore(word: string): number {
-  return word.length <= 3 ? 1 : word.length === 4 ? 2 : word.length === 5 ? 4 : word.length + 1;
-}
-
-function highestScoreWinner(scores: Record<PlayerMark, number>, marks: PlayerMark[]): Winner {
-  const ranked = [...marks].sort((a, b) => scores[b] - scores[a]);
-  return scores[ranked[0]] === scores[ranked[1]] ? "draw" : ranked[0];
-}
-
-function seededRandom(seed: string): () => number {
-  let value = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 2166136261);
-  return () => {
-    value ^= value << 13;
-    value ^= value >>> 17;
-    value ^= value << 5;
-    return ((value >>> 0) % 1_000_000) / 1_000_000;
-  };
-}
-
-function shuffleWithRandom<T>(items: T[], random: () => number): T[] {
-  const shuffled = [...items];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  return shuffled;
-}
-
-function placeWordOnGrid(letters: string[][], word: string, random: () => number): boolean {
-  const size = letters.length;
-  const directions = shuffleWithRandom([
-    { row: 0, column: 1 },
-    { row: 1, column: 0 },
-    { row: 1, column: 1 },
-    { row: -1, column: 1 }
-  ], random);
-  const starts = shuffleWithRandom(
-    Array.from({ length: size * size }, (_, index) => ({ row: Math.floor(index / size), column: index % size })),
-    random
-  );
-  for (const start of starts) {
-    for (const direction of directions) {
-      const points = Array.from({ length: word.length }, (_, index) => ({
-        row: start.row + direction.row * index,
-        column: start.column + direction.column * index
-      }));
-      if (points.some((point) => point.row < 0 || point.row >= size || point.column < 0 || point.column >= size)) continue;
-      if (points.some((point, index) => letters[point.row][point.column] && letters[point.row][point.column] !== word[index])) continue;
-      points.forEach((point, index) => {
-        letters[point.row][point.column] = word[index];
-      });
-      return true;
-    }
-  }
-  return false;
-}
-
-function addUniquePlayer(values: PlayerMark[], value: PlayerMark): void {
-  if (!values.includes(value)) values.push(value);
-}
-
-export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
-  if (!meta?.lastCard && !meta?.dominoes) return meta;
-
-  const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
-  if (meta.lastCard && next.lastCard) {
-    const lastCard = next.lastCard;
-    const counts = {
-      p1: meta.lastCard.handCounts?.p1 ?? meta.lastCard.hands.p1.length,
-      p2: meta.lastCard.handCounts?.p2 ?? meta.lastCard.hands.p2.length,
-      p3: meta.lastCard.handCounts?.p3 ?? meta.lastCard.hands.p3?.length ?? 0,
-      p4: meta.lastCard.handCounts?.p4 ?? meta.lastCard.hands.p4?.length ?? 0
-    };
-    lastCard.handCounts = counts;
-    lastCard.deckCount = meta.lastCard.deckCount ?? meta.lastCard.deck.length;
-    lastCard.deck = [];
-    lastCard.hands = {
-      p1: player === "p1" ? lastCard.hands.p1 : [],
-      p2: player === "p2" ? lastCard.hands.p2 : [],
-      p3: player === "p3" ? lastCard.hands.p3 ?? [] : [],
-      p4: player === "p4" ? lastCard.hands.p4 ?? [] : []
-    };
-  }
-  if (meta.dominoes && next.dominoes) {
-    next.dominoes = maskDominoMetaForPlayer(normalizeDominoMeta(meta.dominoes), player as DominoPlayerMark | undefined);
-  }
-  return next;
-}
-
-function isMorrisPoint(point: BoardPoint): boolean {
-  return MORRIS_POINTS.has(keyOf(point));
-}
-
-function countPieces(board: Cell[][], player: PlayerMark): number {
-  return board.flat().filter((cell) => cell === player).length;
-}
-
-function hasNeighbor(board: Cell[][], row: number, column: number, radius: number): boolean {
-  for (let nextRow = Math.max(0, row - radius); nextRow <= Math.min(board.length - 1, row + radius); nextRow += 1) {
-    for (let nextColumn = Math.max(0, column - radius); nextColumn <= Math.min(board[0].length - 1, column + radius); nextColumn += 1) {
-      if (nextRow === row && nextColumn === column) continue;
-      if (board[nextRow][nextColumn]) return true;
-    }
-  }
-  return false;
-}
-
-function cellAt(board: Cell[][], point: BoardPoint): Cell | undefined {
-  return board[point.row]?.[point.column];
-}
-
-function cloneBoard(board: Cell[][]): Cell[][] {
-  return board.map((row) => [...row]);
-}
-
-function cloneMeta(state: GameState): GameMeta {
-  return state.meta ? JSON.parse(JSON.stringify(state.meta)) as GameMeta : {};
-}
-
-function cloneDotsMeta(meta: DotsMeta): DotsMeta {
-  return JSON.parse(JSON.stringify(meta)) as DotsMeta;
-}
-
-function keyOf(point: BoardPoint): string {
-  return `${point.row},${point.column}`;
-}
-
-function pointFromKey(key: string): BoardPoint {
-  const [row, column] = key.split(",").map(Number);
-  return { row, column };
-}
-
-function otherPlayer(player: PlayerMark): PlayerMark {
-  return player === "p1" ? "p2" : "p1";
-}
+  for (let row = 0; row < state.board.length; row += 1)
