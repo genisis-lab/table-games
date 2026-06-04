@@ -1,0 +1,139 @@
+/*
+ * Dominoes mobile board polish
+ * ----------------------------
+ * Fixes the confusing "wrapped grid" line of play on small screens by keeping
+ * the played tiles as a single, connected, horizontally-scrolling chain, with
+ * clearer open-end targets, better tile scaling, a scroll affordance, and
+ * safe-area handling.
+ *
+ * This file is imported AFTER styles.css (see main.tsx), so these rules win on
+ * equal specificity. Selectors are also scoped (.board-stage.dominoes ...) so
+ * they override the mobile rules in styles.css without needing !important.
+ */
+
+/* Respect the device notch / home indicator (status-bar overlap on phones). */
+.room-shell {
+  padding-top: max(18px, env(safe-area-inset-top));
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+
+/* --- Connected chain (all viewports) ---------------------------------- */
+.domino-center .domino-chain {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0; /* tiles butt together so the line of play reads as one train */
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 28px;
+  border-style: solid;
+  border-color: rgb(255 253 247 / 18%);
+  -webkit-overflow-scrolling: touch;
+}
+
+.domino-center .domino-chain .domino-chain-tile {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+}
+
+/* Flatter shadow inside the chain so adjacent tiles connect cleanly. */
+.domino-center .domino-chain .domino-chain-tile .domino-face {
+  border-radius: 3px;
+  box-shadow:
+    inset 0 3px 0 rgb(255 255 255 / 70%),
+    2px 3px 0 rgb(24 34 41 / 38%);
+}
+
+/* Shared seam between neighbouring tiles instead of a wide gap. */
+.domino-center .domino-chain .domino-chain-tile + .domino-chain-tile .domino-face {
+  border-left-width: 2px;
+}
+
+/* Bias scrolling toward the most recently played end. */
+.domino-center .domino-chain .domino-chain-tile:last-child {
+  scroll-snap-align: end;
+}
+
+/* --- Open ends: clear, tappable, labelled ----------------------------- */
+.domino-center .domino-open-ends {
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.domino-center .domino-open-ends button {
+  flex: 1 1 0;
+  min-height: 48px;
+  font-size: 0.95rem;
+}
+
+/* Pulse the playable end(s) so it's obvious where the selected tile goes. */
+.domino-center .domino-open-ends button:not(:disabled) {
+  animation: dominoEndGlow 1.5s ease-in-out infinite;
+}
+
+@keyframes dominoEndGlow {
+  50% {
+    box-shadow:
+      0 0 0 4px rgb(255 211 61 / 45%),
+      2px 3px 0 var(--ink);
+  }
+}
+
+/* --- Mobile: keep it a single scrolling train, never a grid ----------- */
+@media (max-width: 760px) {
+  .board-stage.dominoes .domino-center .domino-chain {
+    flex-wrap: nowrap; /* the actual bug fix: styles.css wraps this into a grid */
+    align-content: center;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 0;
+    min-height: 96px;
+    padding: 12px 8px;
+    scroll-snap-type: x proximity;
+    /* Fade the edges so it's obvious the chain scrolls horizontally. */
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 22px,
+      #000 calc(100% - 22px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 22px,
+      #000 calc(100% - 22px),
+      transparent 100%
+    );
+  }
+
+  /* Slightly larger, snappable tiles now that they no longer wrap. */
+  .board-stage.dominoes .domino-center .domino-chain .domino-face {
+    width: clamp(58px, 17vw, 76px);
+    min-width: clamp(58px, 17vw, 76px);
+    height: clamp(29px, 8.5vw, 38px);
+  }
+
+  /* Two ends side by side as easy thumb targets. */
+  .board-stage.dominoes .domino-center .domino-open-ends {
+    flex-wrap: nowrap;
+  }
+
+  .board-stage.dominoes .domino-center .domino-open-ends button {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  /* Make whose-turn-it-is the headline of the table. */
+  .board-stage.dominoes .domino-table-badge {
+    width: 100%;
+    font-size: 0.96rem;
+  }
+}
+
+/* --- Reduced motion: drop the end glow -------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .domino-center .domino-open-ends button:not(:disabled) {
+    animation: none;
+  }
+}
