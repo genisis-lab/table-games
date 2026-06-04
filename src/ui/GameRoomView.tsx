@@ -1279,6 +1279,10 @@ function DominoesBoard({
             <strong>{room.winner ? "Match complete" : `${playerNameFor(room.gameId, room.turn)} to move`}</strong>
             <span>{meta.drawMode === "draw" ? `${meta.deck.length} in boneyard` : "Block table"}</span>
           </div>
+          <div className="domino-line-label">
+            <strong>Line of play</strong>
+            <span>{meta.chain.length} tiles down</span>
+          </div>
           <div className="domino-chain" aria-label="Domino chain">
             {meta.chain.length > 0 ? meta.chain.map((tile, index) => (
               <span className={`domino-chain-tile owner-${tile.owner}`} key={`${tile.id}-${index}`}>
