@@ -12,16 +12,16 @@ V1 includes:
 - Dots and Boxes
 - Reversi
 - Checkers
-- Battleship bot mode
+- Sea Battle bot mode
 - Mancala
 - Hex
 - Nine Men's Morris
-- Uno
+- Color Clash
 - Darts
 - Word Hunt
 - Cup Pong
 - Dominoes
-- Flappy Bird
+- Pipe Dash
 - 2048
 - Invite links for friend rooms
 - Bot rooms with Casual, Sharp, and Ruthless modes

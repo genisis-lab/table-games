@@ -4,6 +4,7 @@ import {
   canBotStart,
   chooseBotMove,
   createGameState,
+  finalizeGameState,
   getDefaultBoardVariant,
   getGameDefinition,
   maxPlayersForGame,
@@ -110,6 +111,7 @@ export class GameRoom extends DurableObject<Env> {
 
     if (action === "snapshot") {
       const room = await this.loadRoom(roomId);
+      await this.finalizeRoomIfNeeded(room);
       return Response.json(this.snapshot(room));
     }
 
@@ -146,6 +148,7 @@ export class GameRoom extends DurableObject<Env> {
     const attachment = (ws.deserializeAttachment() ?? {}) as SocketAttachment;
     const roomId = this.getRoomIdFromSocketUrl(ws);
     const room = await this.loadRoom(roomId);
+    await this.finalizeRoomIfNeeded(room);
 
     switch (clientMessage.type) {
       case "join":
@@ -602,6 +605,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private async maybePlayBot(room: StoredRoom): Promise<void> {
+    await this.finalizeRoomIfNeeded(room);
     if (room.opponent !== "bot" || room.game.winner) return;
 
     const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
@@ -698,6 +702,20 @@ export class GameRoom extends DurableObject<Env> {
   private async saveRoom(room: StoredRoom): Promise<void> {
     this.room = room;
     await this.ctx.storage.put(ROOM_KEY, room);
+  }
+
+  private async finalizeRoomIfNeeded(room: StoredRoom): Promise<void> {
+    const previousWinner = room.game.winner;
+    const finalized = finalizeGameState(room.game);
+    if (finalized === room.game) return;
+
+    room.game = finalized;
+    room.updatedAt = Date.now();
+    await this.saveRoom(room);
+
+    if (!previousWinner && room.game.winner) {
+      this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
+    }
   }
 
   private snapshot(room: StoredRoom, guestToken?: string): RoomSnapshot {

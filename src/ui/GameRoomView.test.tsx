@@ -460,7 +460,7 @@ describe("GameRoomView", () => {
     expect(screen.getByRole("button", { name: /row 2, column 2/i })).toHaveClass("last-move");
   });
 
-  it("renders a solo Flappy Bird table without friend-only controls", () => {
+  it("renders a solo Pipe Dash table without friend-only controls", () => {
     render(
       <GameRoomView
         room={{
@@ -487,7 +487,7 @@ describe("GameRoomView", () => {
       />
     );
 
-    expect(screen.getByRole("application", { name: "Flappy Bird" })).toBeInTheDocument();
+    expect(screen.getByRole("application", { name: "Pipe Dash" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
   });
@@ -552,7 +552,7 @@ describe("GameRoomView", () => {
     expect(screen.queryByText("Bot mode")).not.toBeInTheDocument();
   });
 
-  it("renders Uno with a private hand and sends play or draw moves", () => {
+  it("renders Color Clash with a private hand and sends play or draw moves", () => {
     const onMove = vi.fn();
     render(
       <GameRoomView
@@ -601,7 +601,7 @@ describe("GameRoomView", () => {
       />
     );
 
-    expect(screen.getByRole("group", { name: "Uno table" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Color Clash table" })).toBeInTheDocument();
     expect(screen.getByText("7 cards")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Play red 7" }));
@@ -613,7 +613,7 @@ describe("GameRoomView", () => {
     expect(onMove).toHaveBeenCalledWith({ column: -1 });
   });
 
-  it("starts Flappy Bird only from the start button while ready", () => {
+  it("starts Pipe Dash only from the start button while ready", () => {
     render(
       <GameRoomView
         room={{
@@ -640,7 +640,7 @@ describe("GameRoomView", () => {
       />
     );
 
-    const game = screen.getByRole("application", { name: "Flappy Bird" });
+    const game = screen.getByRole("application", { name: "Pipe Dash" });
     fireEvent.pointerDown(game);
     expect(game).toHaveClass("ready");
     expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
@@ -653,7 +653,7 @@ describe("GameRoomView", () => {
     expect(screen.queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
   });
 
-  it("lets desktop players flap Flappy Bird with the space key without focusing the game", () => {
+  it("lets desktop players flap Pipe Dash with the space key without focusing the game", () => {
     render(
       <GameRoomView
         room={{
@@ -683,11 +683,11 @@ describe("GameRoomView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     const allowed = fireEvent.keyDown(window, { key: " ", cancelable: true });
 
-    expect(screen.getByRole("application", { name: "Flappy Bird" })).toHaveClass("playing");
+    expect(screen.getByRole("application", { name: "Pipe Dash" })).toHaveClass("playing");
     expect(allowed).toBe(false);
   });
 
-  it("installs a non-passive document touch listener for mobile Flappy taps", () => {
+  it("installs a non-passive document touch listener for mobile Pipe Dash taps", () => {
     const addEventListener = vi.spyOn(document, "addEventListener");
 
     render(
@@ -731,7 +731,7 @@ describe("GameRoomView", () => {
     addEventListener.mockRestore();
   });
 
-  it("accepts active Flappy taps even when mobile reports the page body as the target", () => {
+  it("accepts active Pipe Dash taps even when mobile reports the page body as the target", () => {
     render(
       <GameRoomView
         room={{
@@ -766,7 +766,7 @@ describe("GameRoomView", () => {
     expect(screen.queryByRole("button", { name: "Flap" })).not.toBeInTheDocument();
   });
 
-  it("creates a fresh random Flappy pipe for each new run", () => {
+  it("creates a fresh random Pipe Dash pipe for each new run", () => {
     const random = vi.spyOn(Math, "random")
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.8);
@@ -779,13 +779,13 @@ describe("GameRoomView", () => {
     random.mockRestore();
   });
 
-  it("starts Flappy Bird with a forgiving first pipe distance", () => {
+  it("starts Pipe Dash with a forgiving first pipe distance", () => {
     const firstRun = createFlappyRun(0, "playing");
 
     expect(firstRun.pipes[0].x).toBeGreaterThanOrEqual(570);
   });
 
-  it("renders Flappy Bird inside a transform motion track", () => {
+  it("renders Pipe Dash inside a transform motion track", () => {
     const { container } = render(
       <GameRoomView
         room={{
@@ -906,7 +906,7 @@ describe("GameRoomView", () => {
     expect(screen.getByLabelText("Box 1, 1 open with 3 sides")).toHaveClass("almost");
   });
 
-  it("reveals sunk Battleship ship art after every cell in that ship is hit", () => {
+  it("reveals sunk Sea Battle ship art after every cell in that ship is hit", () => {
     const shipCells = [
       { row: 1, column: 1 },
       { row: 1, column: 2 }
