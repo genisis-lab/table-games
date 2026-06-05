@@ -873,6 +873,7 @@ function moveLabel(move: GameMove, point: { row: number; column: number }, gameI
     return from ? `${from}-${to}` : to;
   }
   if (gameId === "last-card") return point.column < 0 ? "Draw" : `Card ${point.column + 1}`;
+  if (gameId === "word-hunt") return move.word ? String(move.word).toUpperCase() : "Time";
   if (gameId === "dominoes") {
     if (point.column < 0) return "Pass";
     return `Tile ${point.column + 1} ${move.edge === "h" ? "left" : "right"}`;

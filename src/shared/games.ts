@@ -95,6 +95,8 @@ export interface WordHuntMeta {
   found: Record<PlayerMark, string[]>;
   scores: Record<PlayerMark, number>;
   seed: string;
+  roundStartedAt: number;
+  durationMs: number;
 }
 
 export interface UltimateMeta {
@@ -520,8 +522,12 @@ const WORD_HUNT_BANK = [
   "RACK", "CUP", "DART", "BIRD", "GRID", "LINE", "SWAP", "FIRE", "CHAT", "SCORE",
   "PLAY", "TURN", "WILD", "HIT", "SHIP", "DOMINO", "PONG", "WORD", "HUNT", "NIGHT",
   "PARTY", "DUEL", "BOT", "WIN", "MOVE", "DROP", "FLIP", "JUMP", "KING", "FIVE",
-  "FOUR", "THREE", "RUSH", "RING", "BULL", "CLOSE", "STACK", "BRIDGE", "MILL", "SEAT"
+  "FOUR", "THREE", "RUSH", "RING", "BULL", "CLOSE", "STACK", "BRIDGE", "MILL", "SEAT",
+  "BOWL", "POOL", "GREEN", "LANE", "AIM", "BANK", "SINK", "TIMER", "RACE", "FIND",
+  "FAST", "CLUB", "CUE", "BALL", "GOLF", "PUTT", "HOLE", "PIN", "ROLL", "ANGLE"
 ];
+const WORD_HUNT_CLASSIC_DURATION_MS = 90_000;
+const WORD_HUNT_WIDE_DURATION_MS = 120_000;
 const PLAYER_ORDER: PlayerMark[] = ["p1", "p2", "p3", "p4"];
 
 const HIDDEN_GAME_IDS = new Set<GameId>(["snake"]);
@@ -618,7 +624,7 @@ export function applyGameMove(
   move: GameMove
 ): MoveResult {
   if (state.winner) return { ok: false, state, reason: "This game is already over." };
-  if (player !== state.turn) return { ok: false, state, reason: "It is not your turn." };
+  if (player !== state.turn && state.gameId !== "word-hunt") return { ok: false, state, reason: "It is not your turn." };
 
   switch (state.gameId) {
     case "ultimate-tic-tac-toe":
@@ -1273,12 +1279,29 @@ function applyDartsMove(state: GameState, player: PlayerMark, move: GameMove): M
 
 function applyWordHuntMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
   const clonedMeta = cloneMeta(state);
-  const meta = clonedMeta.wordHunt;
+  const meta = normalizeWordHuntMeta(clonedMeta.wordHunt);
   if (!meta) return { ok: false, state, reason: "The word grid is not ready." };
+  const activeMarks = wordHuntActiveMarks(state);
+  const now = Date.now();
+  if (wordHuntTimeRemaining(meta, now) <= 0) {
+    return {
+      ok: true,
+      point: { row: 0, column: -1 },
+      state: {
+        ...state,
+        winner: highestScoreWinner(meta.scores, activeMarks),
+        winningLine: [],
+        moveCount: state.moveCount + 1,
+        meta: { ...clonedMeta, wordHunt: meta }
+      }
+    };
+  }
 
   const word = cleanWord(move.word);
   if (!word) return { ok: false, state, reason: "Enter a word from the grid." };
-  if (!meta.words.includes(word)) return { ok: false, state, reason: "That word is not hiding on this board." };
+  if (!meta.words.includes(word) || !wordCanBeMade(meta.letters, word)) {
+    return { ok: false, state, reason: "That word is not hiding on this board." };
+  }
   if (PLAYER_ORDER.some((mark) => meta.found[mark].includes(word))) {
     return { ok: false, state, reason: "That word was already found." };
   }
@@ -1286,7 +1309,7 @@ function applyWordHuntMove(state: GameState, player: PlayerMark, move: GameMove)
   meta.found[player].push(word);
   meta.scores[player] += wordScore(word);
   const foundCount = PLAYER_ORDER.reduce((count, mark) => count + meta.found[mark].length, 0);
-  const winner = foundCount >= meta.words.length ? highestScoreWinner(meta.scores, ["p1", "p2"]) : null;
+  const winner = foundCount >= meta.words.length ? highestScoreWinner(meta.scores, activeMarks) : null;
 
   return {
     ok: true,
@@ -1591,8 +1614,9 @@ function getDartsMoves(_state: GameState): GameMove[] {
 }
 
 function getWordHuntMoves(state: GameState, player: PlayerMark): GameMove[] {
-  const meta = state.meta?.wordHunt;
+  const meta = normalizeWordHuntMeta(state.meta?.wordHunt);
   if (!meta) return [];
+  if (wordHuntTimeRemaining(meta) <= 0) return [];
   const found = new Set(PLAYER_ORDER.flatMap((mark) => meta.found[mark]));
   const candidates = meta.words.filter((word) => !found.has(word));
   const limit = player.startsWith("p") ? candidates.length : 0;
@@ -2302,12 +2326,11 @@ function createWordHuntMeta(variant: BoardVariant): WordHuntMeta {
   const size = variant === "wide" ? 5 : 4;
   const seed = Math.random().toString(36).slice(2, 10);
   const random = seededRandom(seed);
-  const candidates = shuffleWithRandom(WORD_HUNT_BANK.filter((word) => word.length <= size), random)
+  const candidates = shuffleWithRandom(WORD_HUNT_BANK.filter((word) => word.length <= size + 1), random)
     .slice(0, size === 5 ? 12 : 9);
   const letters = Array.from({ length: size }, () => Array.from({ length: size }, () => ""));
-  const words: string[] = [];
   for (const word of candidates) {
-    if (placeWordOnGrid(letters, word, random)) words.push(word);
+    placeWordOnGrid(letters, word, random);
   }
   const alphabet = "EEEEAAAARRRIIOOTTTNNSSLLCCUUDDPPMMGGHHBBFFYYKWVXZ";
   for (let row = 0; row < size; row += 1) {
@@ -2317,13 +2340,18 @@ function createWordHuntMeta(variant: BoardVariant): WordHuntMeta {
       }
     }
   }
+  const words = WORD_HUNT_BANK
+    .filter((word) => word.length >= 3 && word.length <= size * size && wordCanBeMade(letters, word))
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
   return {
     size,
     letters,
     words,
     found: emptyPlayerStringLists(),
     scores: emptyPlayerNumbers(),
-    seed
+    seed,
+    roundStartedAt: Date.now(),
+    durationMs: size === 5 ? WORD_HUNT_WIDE_DURATION_MS : WORD_HUNT_CLASSIC_DURATION_MS
   };
 }
 
@@ -2513,6 +2541,55 @@ function dartsTargetFromMove(move: GameMove): DartsTarget | null {
 
 function cleanWord(value: string | undefined): string {
   return String(value ?? "").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 16);
+}
+
+function normalizeWordHuntMeta(meta: WordHuntMeta | undefined): WordHuntMeta | undefined {
+  if (!meta) return undefined;
+  meta.roundStartedAt ||= Date.now();
+  meta.durationMs ||= meta.size === 5 ? WORD_HUNT_WIDE_DURATION_MS : WORD_HUNT_CLASSIC_DURATION_MS;
+  meta.found ||= emptyPlayerStringLists();
+  meta.scores ||= emptyPlayerNumbers();
+  return meta;
+}
+
+function wordHuntTimeRemaining(meta: WordHuntMeta, now = Date.now()): number {
+  return Math.max(0, meta.roundStartedAt + meta.durationMs - now);
+}
+
+function wordHuntActiveMarks(state: GameState): PlayerMark[] {
+  const marks = state.gameId === "word-hunt"
+    ? state.boardVariant === "party" ? PLAYER_ORDER : (["p1", "p2"] as PlayerMark[])
+    : (["p1", "p2"] as PlayerMark[]);
+  return marks.filter((mark) => state.meta?.wordHunt?.scores[mark] !== undefined);
+}
+
+function wordCanBeMade(letters: string[][], word: string): boolean {
+  if (!word || letters.length === 0) return false;
+  const rows = letters.length;
+  const columns = letters[0]?.length ?? 0;
+  const directions = [-1, 0, 1].flatMap((rowDelta) =>
+    [-1, 0, 1].map((columnDelta) => ({ rowDelta, columnDelta }))
+  ).filter((direction) => direction.rowDelta !== 0 || direction.columnDelta !== 0);
+
+  const visit = (row: number, column: number, index: number, used: Set<string>): boolean => {
+    if (row < 0 || row >= rows || column < 0 || column >= columns) return false;
+    const key = `${row},${column}`;
+    if (used.has(key) || letters[row][column] !== word[index]) return false;
+    if (index === word.length - 1) return true;
+    used.add(key);
+    const found = directions.some(({ rowDelta, columnDelta }) =>
+      visit(row + rowDelta, column + columnDelta, index + 1, used)
+    );
+    used.delete(key);
+    return found;
+  };
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      if (visit(row, column, 0, new Set())) return true;
+    }
+  }
+  return false;
 }
 
 function wordScore(word: string): number {

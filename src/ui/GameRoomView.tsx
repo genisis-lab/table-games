@@ -20,6 +20,7 @@ import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEv
 import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
 import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
+import { ThreeGameScene } from "./ThreeGameScene";
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting";
 
@@ -395,7 +396,7 @@ function Board({
   }
 
   if (room.gameId === "word-hunt") {
-    return <WordHuntBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+    return <WordHuntBoard room={room} canMove={Boolean(currentMark && !room.winner)} currentMark={currentMark} onMove={onMove} />;
   }
 
   if (room.gameId === "cup-pong") {
@@ -754,10 +755,12 @@ function BattleshipBoard({
   const shots = room.meta?.battleship?.humanShots ?? {};
   const botShots = room.meta?.battleship?.botShots ?? {};
   const sunkShips = (room.meta?.battleship?.botFleet ?? []).filter((ship) => isShipSunk(ship, shots));
+  const hitCount = Object.values(shots).filter((shot) => shot === "hit").length;
   return (
     <div className="battleship-wrap">
+      <ThreeGameScene kind="battleship" stateKey={`${hitCount}-${sunkShips.length}-${Object.keys(shots).length}`} intensity={hitCount + sunkShips.length * 2} />
       <div className="fleet-status">
-        <span>Your hits {Object.values(shots).filter((shot) => shot === "hit").length}</span>
+        <span>Your hits {hitCount}</span>
         <span>Incoming {Object.keys(botShots).length}</span>
       </div>
       <div className="battleship-board" role="group" aria-label="Battleship target board">
@@ -1030,6 +1033,7 @@ function DartsBoard({
   const segments = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
   return (
     <div className="darts-table" role="group" aria-label="Darts board">
+      <ThreeGameScene kind="darts" stateKey={`${meta.throws.length}-${meta.dartsLeft}-${meta.scores.p1}-${meta.scores.p2}`} intensity={meta.throws.length % 3} />
       <div className="darts-scoreboard">
         {(["p1", "p2"] as PlayerMark[]).map((mark) => (
           <div className={room.turn === mark ? "active" : ""} key={mark}>
@@ -1090,13 +1094,25 @@ function WordHuntBoard({
   onMove: (move: GameMove) => void;
 }) {
   const [word, setWord] = useState("");
+  const [now, setNow] = useState(Date.now());
   const meta = room.meta?.wordHunt;
+  useEffect(() => {
+    if (!meta || room.winner) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [meta, room.winner]);
   if (!meta) return null;
   const found = new Set((["p1", "p2", "p3", "p4"] as PlayerMark[]).flatMap((mark) => meta.found[mark] ?? []));
+  const durationMs = meta.durationMs || (meta.size === 5 ? 120_000 : 90_000);
+  const endsAt = (meta.roundStartedAt || now) + durationMs;
+  const remainingMs = Math.max(0, endsAt - now);
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const canSubmit = canMove && remainingMs > 0;
+  const foundCount = found.size;
   const submitWord = (event: FormEvent) => {
     event.preventDefault();
     const clean = word.trim().toUpperCase();
-    if (!clean) return;
+    if (!clean || !canSubmit) return;
     onMove({ column: 0, word: clean });
     setWord("");
   };
@@ -1104,10 +1120,16 @@ function WordHuntBoard({
     <div className="word-hunt-table" role="group" aria-label="Word Hunt board">
       <div className="word-hunt-header">
         {(["p1", "p2"] as PlayerMark[]).map((mark) => (
-          <span className={room.turn === mark ? "active" : ""} key={mark}>
+          <span className={currentMark === mark ? "active" : ""} key={mark}>
             {playerNameFor(room.gameId, mark)} <strong>{meta.scores[mark]}</strong>
           </span>
         ))}
+        <span className={remainingSeconds <= 10 ? "timer danger" : "timer"}>
+          Time <strong>{formatClock(remainingSeconds)}</strong>
+        </span>
+        <span>
+          Found <strong>{foundCount}/{meta.words.length}</strong>
+        </span>
       </div>
       <div className="word-grid" style={{ "--word-size": meta.size } as CSSProperties}>
         {meta.letters.flatMap((row, rowIndex) =>
@@ -1121,12 +1143,12 @@ function WordHuntBoard({
         <input
           id="word-hunt-input"
           value={word}
-          disabled={!canMove}
+          disabled={!canSubmit}
           autoCapitalize="characters"
           onChange={(event) => setWord(event.target.value)}
-          placeholder={currentMark ? "TYPE WORD" : "WATCHING"}
+          placeholder={currentMark ? remainingMs > 0 ? "TYPE WORD" : "TIME UP" : "WATCHING"}
         />
-        <button className="primary-button" type="submit" disabled={!canMove || word.trim().length < 2}>Play</button>
+        <button className="primary-button" type="submit" disabled={!canSubmit || word.trim().length < 2}>Find</button>
       </form>
       <div className="word-hunt-side">
         <div className="word-list" aria-label="Words found">
@@ -1139,6 +1161,13 @@ function WordHuntBoard({
       </div>
     </div>
   );
+}
+
+function formatClock(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function CupPongBoard({
@@ -1233,6 +1262,11 @@ function CupPongBoard({
         "--cup-pull-y": `${drag.pullY}px`
       } as CSSProperties}
     >
+      <ThreeGameScene
+        kind="cup-pong"
+        stateKey={`${meta.made.p1}-${meta.made.p2}-${lastThrow?.target ?? "none"}-${lastThrow?.made ?? "none"}`}
+        intensity={lastThrow ? lastThrow.made ? 1 : 0.35 : 0}
+      />
       <div className="cup-pong-hud">
         <span><strong>{meta.made.p1}</strong> Blue</span>
         <span>{meta.ballsRemaining} ball{meta.ballsRemaining === 1 ? "" : "s"}</span>
@@ -2457,7 +2491,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
   if (gameId === "last-card") return "Match the top card by color or rank. Skips and reverses bounce the turn, +2 and wild +4 make the other side draw.";
   if (gameId === "darts") return "Take three throws per turn and race down to exactly zero.";
-  if (gameId === "word-hunt") return "Type hidden words from the letter grid. Longer words score more, and found words cannot be reused.";
+  if (gameId === "word-hunt") return "Find as many connected words as you can before the timer ends. Longer words score more, and each word can be claimed once.";
   if (gameId === "cup-pong") return "Pick an opponent cup to sink it. Clear the other rack before yours disappears.";
   if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";
   if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
@@ -2471,7 +2505,7 @@ function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
   if (gameId === "last-card") return "Uno hand shark. It saves wilds for awkward moments and keeps the table color uncomfortable.";
   if (gameId === "darts") return "Checkout hunter. It aims for clean triples and avoids wasting darts near zero.";
-  if (gameId === "word-hunt") return "Fast word spotter. It reaches for longer finds when the board opens up.";
+  if (gameId === "word-hunt") return "Timed word racer. It keeps hunting while you type and favors longer finds on harder modes.";
   if (gameId === "cup-pong") return "Cup closer. It pressures the middle of the rack and finishes clean.";
   if (gameId === "dominoes") return "Pip counter. It burns heavy tiles early and keeps matching numbers alive.";
   return gameId === "battleship"

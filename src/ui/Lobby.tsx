@@ -196,7 +196,7 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
   if (gameId === "last-card") return "Uno-style color matching with skips, reverses, wilds, and draw cards.";
   if (gameId === "darts") return "Throw for 301 or 501 on a bright pub dartboard.";
-  if (gameId === "word-hunt") return "Fresh letter grids every room, race the bot or a friend for hidden words.";
+  if (gameId === "word-hunt") return "Timed letter-grid races where every connected word you spot adds to your score.";
   if (gameId === "cup-pong") return "Clear the rack cup by cup with a clean table-top bounce feel.";
   if (gameId === "dominoes") return "A four-seat double-six table with bots ready to fill empty chairs.";
   if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
