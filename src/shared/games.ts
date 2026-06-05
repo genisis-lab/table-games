@@ -106,6 +106,7 @@ export interface UltimateMeta {
 
 export interface CheckersMeta {
   kings: string[];
+  mustContinueFrom?: string | null;
 }
 
 export interface BattleshipShot {
@@ -295,7 +296,7 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
   },
   battleship: {
     id: "battleship",
-    name: "Battleship",
+    name: "Sea Battle",
     rows: 10,
     columns: 10,
     connectLength: 0,
@@ -335,7 +336,7 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
   },
   "last-card": {
     id: "last-card",
-    name: "Uno",
+    name: "Color Clash",
     rows: 1,
     columns: 1,
     connectLength: 0,
@@ -385,7 +386,7 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
   },
   "flappy-bird": {
     id: "flappy-bird",
-    name: "Flappy Bird",
+    name: "Pipe Dash",
     rows: 1,
     columns: 1,
     connectLength: 0,
@@ -618,6 +619,24 @@ export function createGameState(gameId: GameId, boardVariant: BoardVariant = get
   };
 }
 
+export function finalizeGameState(state: GameState, now = Date.now()): GameState {
+  if (state.winner) return state;
+  if (state.gameId !== "word-hunt") return state;
+
+  const clonedMeta = cloneMeta(state);
+  const meta = normalizeWordHuntMeta(clonedMeta.wordHunt);
+  if (!meta || wordHuntTimeRemaining(meta, now) > 0) return state;
+  const finalizedMeta = { ...clonedMeta, wordHunt: meta };
+  const finalizedState = { ...state, meta: finalizedMeta };
+
+  return {
+    ...state,
+    winner: highestScoreWinner(meta.scores, wordHuntActiveMarks(finalizedState)),
+    winningLine: [],
+    meta: finalizedMeta
+  };
+}
+
 export function applyGameMove(
   state: GameState,
   player: PlayerMark,
@@ -744,13 +763,19 @@ export function chooseBotMove(
     return chooseDotsMove({ ...state, turn: player }, legalMoves, difficulty);
   }
 
+  if (state.gameId === "checkers") {
+    return chooseCheckersMove({ ...state, turn: player }, player, legalMoves, difficulty);
+  }
+
   if (state.gameId === "tic-tac-toe" && difficulty === "ruthless") {
     return state.board.length === 3
       ? chooseByMinimax(state, player, legalMoves, 9)
       : chooseBySearch({ ...state, turn: player }, player, legalMoves, 2);
   }
 
-  if (state.gameId === "battleship") return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+  if (state.gameId === "battleship") {
+    return chooseBattleshipMove({ ...state, turn: player }, player, legalMoves, difficulty);
+  }
 
   const depth = legalMoves.length > 90
     ? 1
@@ -825,8 +850,8 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   if (gameId === "checkers") return { checkers: { kings: [] } };
 
   if (gameId === "battleship") {
-    const botFleet = makeFleetShips(1);
-    const playerFleet = makeFleetShips(6);
+    const botFleet = makeFleetShips();
+    const playerFleet = makeFleetShips();
     return {
       battleship: {
         botFleet,
@@ -994,6 +1019,25 @@ function applyCheckersMove(state: GameState, player: PlayerMark, move: GameMove)
   if (cellAt(state.board, to) !== null) return { ok: false, state, reason: "That landing spot is occupied." };
   if ((to.row + to.column) % 2 !== 1) return { ok: false, state, reason: "Checkers move on dark squares." };
 
+  const legalMoves = getCheckersMoves(state, player);
+  const legalMove = legalMoves.find((candidate) =>
+    candidate.row === from.row &&
+    candidate.column === from.column &&
+    candidate.toRow === to.row &&
+    candidate.toColumn === to.column
+  );
+  if (!legalMove) {
+    const captureAvailable = collectCheckersMoves(state, player).captures.length > 0;
+    if (state.meta?.checkers?.mustContinueFrom && keyOf(from) !== state.meta.checkers.mustContinueFrom) {
+      return { ok: false, state, reason: "Continue the jump with the same checker." };
+    }
+    return {
+      ok: false,
+      state,
+      reason: captureAvailable ? "You must take a jump when one is available." : "That checker cannot move there."
+    };
+  }
+
   const meta = cloneMeta(state).checkers!;
   const king = meta.kings.includes(keyOf(from));
   const rowDelta = to.row - from.row;
@@ -1014,7 +1058,17 @@ function applyCheckersMove(state: GameState, player: PlayerMark, move: GameMove)
   board[from.row][from.column] = null;
   board[to.row][to.column] = player;
   meta.kings = meta.kings.filter((key) => key !== keyOf(from));
-  if (king || to.row === (player === "p1" ? 0 : 7)) meta.kings.push(keyOf(to));
+  const crowned = to.row === (player === "p1" ? 0 : 7);
+  if (king || crowned) meta.kings.push(keyOf(to));
+
+  const continuationState: GameState = {
+    ...state,
+    board,
+    meta: { ...cloneMeta(state), checkers: { ...meta, mustContinueFrom: keyOf(to) } },
+    turn: player
+  };
+  const mustContinue = capture && !crowned && getCheckersMoves(continuationState, player).length > 0;
+  meta.mustContinueFrom = mustContinue ? keyOf(to) : null;
 
   const opponent = otherPlayer(player);
   const winner = board.flat().includes(opponent) && getCheckersMoves({ ...state, board, meta: { ...cloneMeta(state), checkers: meta }, turn: opponent }, opponent).length > 0
@@ -1022,6 +1076,7 @@ function applyCheckersMove(state: GameState, player: PlayerMark, move: GameMove)
     : player;
   return okMove(state, board, player, to, {
     winner,
+    nextTurn: mustContinue && !winner ? player : otherPlayer(player),
     meta: { ...cloneMeta(state), checkers: meta }
   });
 }
@@ -1502,6 +1557,103 @@ function dotsDangerScore(meta: DotsMeta, move: GameMove): number {
     .reduce((score, box) => score + dotsBoxSideCount(next, box.row, box.column), 0);
 }
 
+function chooseCheckersMove(
+  state: GameState,
+  player: PlayerMark,
+  legalMoves: GameMove[],
+  difficulty: BotDifficulty
+): GameMove {
+  const scored = orderedMoves(state, legalMoves)
+    .map((move) => {
+      const result = applyGameMove({ ...state, turn: player }, player, move);
+      const to = { row: move.toRow ?? 0, column: move.toColumn ?? move.column };
+      const from = { row: move.row ?? 0, column: move.column };
+      const capture = Math.abs(to.row - from.row) === 2;
+      const crowns = to.row === (player === "p1" ? 0 : 7);
+      const pieceIsKing = state.meta?.checkers?.kings?.includes(keyOf(from)) ?? false;
+      const center = 12 - (Math.abs(to.row - 3.5) + Math.abs(to.column - 3.5)) * 2;
+      const continuation = result.ok && result.state.turn === player && !result.state.winner ? 260 : 0;
+      const tacticScore = (capture ? 720 : 0) + (crowns ? 560 : 0) + (pieceIsKing ? 90 : 0) + center + continuation;
+      const searchScore = result.ok
+        ? difficulty === "casual"
+          ? boardScore(result.state, player)
+          : evaluateState(result.state, player, difficulty === "sharp" ? 2 : 4)
+        : Number.NEGATIVE_INFINITY;
+      const noise = difficulty === "casual" ? Math.random() * 140 : difficulty === "sharp" ? Math.random() * 18 : 0;
+      return { move, score: tacticScore + searchScore + noise };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (difficulty === "casual" && scored.length > 1) {
+    return scored[Math.floor(Math.random() * Math.min(2, scored.length))]?.move ?? scored[0].move;
+  }
+
+  return scored[0]?.move ?? legalMoves[0];
+}
+
+function chooseBattleshipMove(
+  state: GameState,
+  player: PlayerMark,
+  legalMoves: GameMove[],
+  difficulty: BotDifficulty
+): GameMove {
+  const meta = state.meta?.battleship;
+  if (!meta) return legalMoves[0];
+  const shots = player === "p1" ? meta.humanShots : meta.botShots;
+  const unshot = new Set(legalMoves.map((move) => keyOf({ row: move.row ?? 0, column: move.column })));
+  const hitPoints = Object.entries(shots)
+    .filter(([, shot]) => shot === "hit")
+    .map(([key]) => pointFromKey(key));
+
+  const targetMoves = hitPoints
+    .flatMap((point) => [
+      { row: point.row - 1, column: point.column },
+      { row: point.row + 1, column: point.column },
+      { row: point.row, column: point.column - 1 },
+      { row: point.row, column: point.column + 1 }
+    ])
+    .filter((point) => point.row >= 0 && point.row < 10 && point.column >= 0 && point.column < 10 && unshot.has(keyOf(point)))
+    .map((point) => ({ row: point.row, column: point.column }));
+
+  if (targetMoves.length > 0) {
+    return orderedBattleshipTargets(targetMoves, shots)[0] ?? legalMoves[0];
+  }
+
+  const huntMoves = difficulty === "casual"
+    ? legalMoves
+    : legalMoves.filter((move) => ((move.row ?? 0) + move.column) % 2 === 0);
+  const candidates = huntMoves.length > 0 ? huntMoves : legalMoves;
+  const ordered = orderedBattleshipTargets(candidates, shots);
+  if (difficulty === "casual") return ordered[Math.floor(Math.random() * ordered.length)] ?? legalMoves[0];
+  if (difficulty === "sharp" && ordered.length > 3) {
+    return ordered[Math.floor(Math.random() * Math.min(3, ordered.length))] ?? ordered[0];
+  }
+  return ordered[0] ?? legalMoves[0];
+}
+
+function orderedBattleshipTargets(moves: GameMove[], shots: Record<string, "hit" | "miss">): GameMove[] {
+  const center = 4.5;
+  return [...moves].sort((a, b) => {
+    const aRow = a.row ?? 0;
+    const bRow = b.row ?? 0;
+    const aNeighborHits = battleshipNeighborHits({ row: aRow, column: a.column }, shots);
+    const bNeighborHits = battleshipNeighborHits({ row: bRow, column: b.column }, shots);
+    if (aNeighborHits !== bNeighborHits) return bNeighborHits - aNeighborHits;
+    const aDistance = Math.abs(aRow - center) + Math.abs(a.column - center);
+    const bDistance = Math.abs(bRow - center) + Math.abs(b.column - center);
+    return aDistance - bDistance;
+  });
+}
+
+function battleshipNeighborHits(point: BoardPoint, shots: Record<string, "hit" | "miss">): number {
+  return [
+    { row: point.row - 1, column: point.column },
+    { row: point.row + 1, column: point.column },
+    { row: point.row, column: point.column - 1 },
+    { row: point.row, column: point.column + 1 }
+  ].filter((candidate) => shots[keyOf(candidate)] === "hit").length;
+}
+
 function adjacentDotsBoxes(meta: DotsMeta, edge: "h" | "v", row: number, column: number): BoardPoint[] {
   const boxes = edge === "h"
     ? [{ row: row - 1, column }, { row, column }]
@@ -1528,28 +1680,40 @@ function getReversiMoves(state: GameState, player: PlayerMark): GameMove[] {
 }
 
 function getCheckersMoves(state: GameState, player: PlayerMark): GameMove[] {
-  const moves: GameMove[] = [];
+  const { simpleMoves, captures } = collectCheckersMoves(state, player);
+  return captures.length > 0 ? captures : simpleMoves;
+}
+
+function collectCheckersMoves(state: GameState, player: PlayerMark): { simpleMoves: GameMove[]; captures: GameMove[] } {
+  const simpleMoves: GameMove[] = [];
+  const captures: GameMove[] = [];
   const kings = state.meta?.checkers?.kings ?? [];
+  const rawForcedSource = state.meta?.checkers?.mustContinueFrom ?? null;
+  const forcedPoint = rawForcedSource ? pointFromKey(rawForcedSource) : null;
+  const forcedSource = forcedPoint && cellAt(state.board, forcedPoint) === player ? rawForcedSource : null;
   for (let row = 0; row < 8; row += 1) {
     for (let column = 0; column < 8; column += 1) {
       if (state.board[row][column] !== player) continue;
+      if (forcedSource && forcedSource !== `${row},${column}`) continue;
       const dirs = kings.includes(`${row},${column}`)
         ? [-1, 1]
         : [player === "p1" ? -1 : 1];
       for (const rowDir of dirs) {
         for (const columnDir of [-1, 1]) {
           const simple = { row: row + rowDir, column: column + columnDir };
-          if (cellAt(state.board, simple) === null) moves.push({ row, column, toRow: simple.row, toColumn: simple.column });
+          if (!forcedSource && cellAt(state.board, simple) === null) {
+            simpleMoves.push({ row, column, toRow: simple.row, toColumn: simple.column });
+          }
           const jumped = { row: row + rowDir, column: column + columnDir };
           const landing = { row: row + rowDir * 2, column: column + columnDir * 2 };
           if (cellAt(state.board, jumped) === otherPlayer(player) && cellAt(state.board, landing) === null) {
-            moves.push({ row, column, toRow: landing.row, toColumn: landing.column });
+            captures.push({ row, column, toRow: landing.row, toColumn: landing.column });
           }
         }
       }
     }
   }
-  return moves;
+  return { simpleMoves, captures };
 }
 
 function getBattleshipMoves(state: GameState, player: PlayerMark): GameMove[] {
@@ -2289,22 +2453,55 @@ function removeMorrisPiece(board: Cell[][], meta: MorrisMeta, opponent: PlayerMa
   }
 }
 
-function makeFleetShips(offset: number): BattleshipShip[] {
-  const ships: Array<Omit<BattleshipShip, "cells"> & { row: number; column: number }> = [
-    { id: "carrier", name: "Carrier", size: 5, orientation: "horizontal", row: 0, column: offset },
-    { id: "battleship", name: "Battleship", size: 4, orientation: "vertical", row: 2, column: offset + 1 },
-    { id: "cruiser", name: "Cruiser", size: 3, orientation: "horizontal", row: 5, column: offset },
-    { id: "submarine", name: "Submarine", size: 3, orientation: "vertical", row: 7, column: offset + 3 },
-    { id: "patrol", name: "Patrol Boat", size: 2, orientation: "horizontal", row: 9, column: offset }
+function makeFleetShips(): BattleshipShip[] {
+  const specs: Array<Omit<BattleshipShip, "cells" | "orientation">> = [
+    { id: "carrier", name: "Carrier", size: 5 },
+    { id: "battleship", name: "Battleship", size: 4 },
+    { id: "cruiser", name: "Cruiser", size: 3 },
+    { id: "submarine", name: "Submarine", size: 3 },
+    { id: "patrol", name: "Patrol Boat", size: 2 }
   ];
+  const occupied = new Set<string>();
+  const fleet: BattleshipShip[] = [];
 
-  return ships.map(({ row, column, ...ship }) => ({
-    ...ship,
-    cells: Array.from({ length: ship.size }, (_, index) => ({
-      row: row + (ship.orientation === "vertical" ? index : 0),
-      column: (column + (ship.orientation === "horizontal" ? index : 0)) % 10
-    }))
-  }));
+  for (const spec of specs) {
+    const placement = placeBattleshipSpec(spec.size, occupied);
+    placement.cells.forEach((cell) => occupied.add(keyOf(cell)));
+    fleet.push({ ...spec, orientation: placement.orientation, cells: placement.cells });
+  }
+
+  return fleet;
+}
+
+function placeBattleshipSpec(
+  size: number,
+  occupied: Set<string>
+): { orientation: BattleshipShip["orientation"]; cells: BattleshipShot[] } {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const orientation: BattleshipShip["orientation"] = Math.random() < 0.5 ? "horizontal" : "vertical";
+    const row = Math.floor(Math.random() * (orientation === "vertical" ? 11 - size : 10));
+    const column = Math.floor(Math.random() * (orientation === "horizontal" ? 11 - size : 10));
+    const cells = Array.from({ length: size }, (_, index) => ({
+      row: row + (orientation === "vertical" ? index : 0),
+      column: column + (orientation === "horizontal" ? index : 0)
+    }));
+    if (cells.every((cell) => !occupied.has(keyOf(cell)))) return { orientation, cells };
+  }
+
+  for (const orientation of ["horizontal", "vertical"] as const) {
+    for (let row = 0; row < 10; row += 1) {
+      for (let column = 0; column < 10; column += 1) {
+        const cells = Array.from({ length: size }, (_, index) => ({
+          row: row + (orientation === "vertical" ? index : 0),
+          column: column + (orientation === "horizontal" ? index : 0)
+        }));
+        if (cells.some((cell) => cell.row >= 10 || cell.column >= 10 || occupied.has(keyOf(cell)))) continue;
+        return { orientation, cells };
+      }
+    }
+  }
+
+  return { orientation: "horizontal", cells: [] };
 }
 
 function flattenFleet(fleet: BattleshipShip[]): BattleshipShot[] {

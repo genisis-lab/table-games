@@ -191,15 +191,15 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "dots-and-boxes") return "Draw the last line, claim the box, keep the turn.";
   if (gameId === "reversi") return "Flip whole rows of discs and watch the table change sides.";
   if (gameId === "checkers") return "Diagonal jumps, kings, and clean classic board energy.";
-  if (gameId === "battleship") return "Bot-only fleet hunting with splashy misses and nasty hits.";
+  if (gameId === "battleship") return "Bot-only sea combat with splashy misses and nasty hits.";
   if (gameId === "mancala") return "Sow stones around the table and steal from the opposite pit.";
   if (gameId === "hex") return "Build an unbroken bridge across a sharp little hex board.";
-  if (gameId === "last-card") return "Uno-style color matching with skips, reverses, wilds, and draw cards.";
+  if (gameId === "last-card") return "Color-card shedding with skips, reverses, wilds, and draw cards.";
   if (gameId === "darts") return "Throw for 301 or 501 on a bright pub dartboard.";
   if (gameId === "word-hunt") return "Timed letter-grid races where every connected word you spot adds to your score.";
   if (gameId === "cup-pong") return "Clear the rack cup by cup with a clean table-top bounce feel.";
   if (gameId === "dominoes") return "A four-seat double-six table with bots ready to fill empty chairs.";
-  if (gameId === "flappy-bird") return "A crisp little sky run with random pipes and instant restarts.";
+  if (gameId === "flappy-bird") return "A crisp little pipe-dodging sky run with random gaps and instant restarts.";
   if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
   return "Place, slide, make mills, and knock pieces off the board.";
 }

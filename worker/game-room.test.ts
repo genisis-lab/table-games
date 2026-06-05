@@ -186,7 +186,7 @@ describe("GameRoom Durable Object", () => {
     expect(meta?.teamScores).toEqual({ northSouth: 0, eastWest: 0 });
   });
 
-  it("masks Uno opponent hands and draw-pile order in room snapshots", async () => {
+  it("masks Color Clash opponent hands and draw-pile order in room snapshots", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({
@@ -211,7 +211,7 @@ describe("GameRoom Durable Object", () => {
     expect(meta?.discard).toHaveLength(1);
   });
 
-  it("creates Flappy Bird as a solo room without seating a bot opponent", async () => {
+  it("creates Pipe Dash as a solo room without seating a bot opponent", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({

@@ -11,10 +11,10 @@ describe("Lobby", () => {
     expect(screen.getByText("Four in a Row")).toBeInTheDocument();
     expect(screen.getByText("Tic Tac Toe")).toBeInTheDocument();
     expect(screen.getByText("Gomoku")).toBeInTheDocument();
-    expect(screen.getByText("Flappy Bird")).toBeInTheDocument();
+    expect(screen.getByText("Pipe Dash")).toBeInTheDocument();
     expect(screen.queryByText("Snake")).not.toBeInTheDocument();
     expect(screen.getByText("2048")).toBeInTheDocument();
-    expect(screen.getByText("Uno")).toBeInTheDocument();
+    expect(screen.getByText("Color Clash")).toBeInTheDocument();
     expect(screen.getByText("Darts")).toBeInTheDocument();
     expect(screen.getByText("Word Hunt")).toBeInTheDocument();
     expect(screen.getByText("Cup Pong")).toBeInTheDocument();
@@ -42,8 +42,8 @@ describe("Lobby", () => {
       botDifficulty: "ruthless"
     });
 
-    const flappyCard = screen.getByRole("article", { name: /flappy bird game card/i });
-    fireEvent.click(within(flappyCard).getByRole("button", { name: /play flappy bird solo/i }));
+    const flappyCard = screen.getByRole("article", { name: /pipe dash game card/i });
+    fireEvent.click(within(flappyCard).getByRole("button", { name: /play pipe dash solo/i }));
     expect(onCreateRoom).toHaveBeenCalledWith("flappy-bird", {
       opponent: "bot",
       botDifficulty: "ruthless"
@@ -61,8 +61,8 @@ describe("Lobby", () => {
       botDifficulty: "ruthless"
     });
 
-    const lastCard = screen.getByRole("article", { name: /uno game card/i });
-    fireEvent.click(within(lastCard).getByRole("button", { name: /invite friend to uno/i }));
+    const lastCard = screen.getByRole("article", { name: /color clash game card/i });
+    fireEvent.click(within(lastCard).getByRole("button", { name: /invite friend to color clash/i }));
     expect(onCreateRoom).toHaveBeenCalledWith("last-card", {
       opponent: "friend",
       botDifficulty: "ruthless"
@@ -70,10 +70,10 @@ describe("Lobby", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Arcade" }));
     expect(screen.queryByRole("article", { name: /four in a row game card/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("article", { name: /flappy bird game card/i })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: /pipe dash game card/i })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Search games"), { target: { value: "word" } });
     expect(screen.getByRole("article", { name: /word hunt game card/i })).toBeInTheDocument();
-    expect(screen.queryByRole("article", { name: /flappy bird game card/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: /pipe dash game card/i })).not.toBeInTheDocument();
   });
 });

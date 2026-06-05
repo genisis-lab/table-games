@@ -14,7 +14,9 @@ import {
   RotateCcw,
   Send,
   Sparkles,
-  UsersRound
+  UsersRound,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
@@ -63,6 +65,7 @@ export function GameRoomView({
   onSetBotStarts = () => undefined
 }: GameRoomViewProps) {
   const [message, setMessage] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(readSoundPreference);
   const definition = getGameDefinition(room.gameId);
   const solo = isSoloGame(room.gameId);
   const boardVariantOptions = getBoardVariantOptions(room.gameId);
@@ -105,7 +108,11 @@ export function GameRoomView({
       ? "Reconnecting..."
       : "Connecting...";
 
-  useGameFeedback(room, lastMove);
+  useEffect(() => {
+    writeSoundPreference(soundEnabled);
+  }, [soundEnabled]);
+
+  useGameFeedback(room, lastMove, soundEnabled);
 
   const submitChat = (event: FormEvent) => {
     event.preventDefault();
@@ -151,6 +158,15 @@ export function GameRoomView({
             <h1>{definition.name}</h1>
           </div>
           <div className={`status-chip connection-${connectionStatus}`}>{status}</div>
+          <button
+            className="icon-button sound-toggle"
+            type="button"
+            aria-label={soundEnabled ? "Mute sounds" : "Unmute sounds"}
+            title={soundEnabled ? "Mute sounds" : "Unmute sounds"}
+            onClick={() => setSoundEnabled((enabled) => !enabled)}
+          >
+            {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          </button>
           <button className="icon-text-button" type="button" onClick={onRematch}>
             <RotateCcw size={18} />
             {rematchText}
@@ -763,7 +779,7 @@ function BattleshipBoard({
         <span>Your hits {hitCount}</span>
         <span>Incoming {Object.keys(botShots).length}</span>
       </div>
-      <div className="battleship-board" role="group" aria-label="Battleship target board">
+    <div className="battleship-board" role="group" aria-label="Sea Battle target board">
         {room.board.flatMap((row, rowIndex) =>
           row.map((_, columnIndex) => {
             const shot = shots[`${rowIndex},${columnIndex}`];
@@ -946,7 +962,7 @@ function LastCardBoard({
   const canDraw = canMove && (deckCount > 0 || meta.discard.length > 1);
 
   return (
-    <div className="last-card-table" role="group" aria-label="Uno table">
+    <div className="last-card-table" role="group" aria-label="Color Clash table">
       <div className="last-card-players" aria-label="Card counts">
         {(["p1", "p2"] as const).map((mark) => {
           const player = room.players.find((candidate) => candidate.mark === mark);
@@ -2150,7 +2166,7 @@ function FlappyBirdGame() {
       ref={playfieldRef}
       className={`flappy-game ${run.phase}`}
       role="application"
-      aria-label="Flappy Bird"
+      aria-label="Pipe Dash"
       tabIndex={0}
     >
       <div className="flappy-score" aria-label="Score">
@@ -2339,7 +2355,25 @@ function ReactionLayer({ reactions }: { reactions: RoomSnapshot["reactionEvents"
   );
 }
 
-function useGameFeedback(room: RoomSnapshot, lastMove: AppliedMove | null): void {
+const SOUND_PREFERENCE_KEY = "table-sparks-sound-enabled";
+
+function readSoundPreference(): boolean {
+  try {
+    return localStorage.getItem(SOUND_PREFERENCE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeSoundPreference(enabled: boolean): void {
+  try {
+    localStorage.setItem(SOUND_PREFERENCE_KEY, String(enabled));
+  } catch {
+    // Sound is a local preference; gameplay should not depend on storage.
+  }
+}
+
+function useGameFeedback(room: RoomSnapshot, lastMove: AppliedMove | null, soundEnabled: boolean): void {
   const lastMoveIdRef = useRef<string>("");
   const lastWinnerRef = useRef(room.winner);
 
@@ -2348,9 +2382,9 @@ function useGameFeedback(room: RoomSnapshot, lastMove: AppliedMove | null): void
     const id = `${lastMove.player}-${lastMove.row}-${lastMove.column}-${lastMove.at}`;
     if (lastMoveIdRef.current === id) return;
     lastMoveIdRef.current = id;
-    playTableTone(room.gameId === "battleship" ? "hit" : "move");
+    if (soundEnabled) playTableTone(room.gameId === "battleship" ? "hit" : "move");
     pulseDevice(12);
-  }, [lastMove, room.gameId]);
+  }, [lastMove, room.gameId, soundEnabled]);
 
   useEffect(() => {
     if (!room.winner || lastWinnerRef.current === room.winner) {
@@ -2358,9 +2392,9 @@ function useGameFeedback(room: RoomSnapshot, lastMove: AppliedMove | null): void
       return;
     }
     lastWinnerRef.current = room.winner;
-    playTableTone(room.winner === "draw" ? "draw" : "win");
+    if (soundEnabled) playTableTone(room.winner === "draw" ? "draw" : "win");
     pulseDevice(room.winner === "draw" ? 18 : 34);
-  }, [room.winner]);
+  }, [room.winner, soundEnabled]);
 }
 
 type FeedbackTone = "move" | "hit" | "win" | "draw";
@@ -2494,7 +2528,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "word-hunt") return "Find as many connected words as you can before the timer ends. Longer words score more, and each word can be claimed once.";
   if (gameId === "cup-pong") return "Pick an opponent cup to sink it. Clear the other rack before yours disappears.";
   if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";
-  if (gameId === "flappy-bird") return "Thread the bird through shifting pipe gaps and chase a clean high score.";
+  if (gameId === "flappy-bird") return "Thread the flyer through shifting pipe gaps and chase a clean high score.";
   if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
   if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
   return "Place nine pieces, form mills of three, then slide pieces and remove opponent pieces.";
@@ -2503,7 +2537,7 @@ function rulesFor(gameId: GameId): string {
 function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (difficulty === "casual") return "Loose and playful. It sees obvious wins but leaves room for drama.";
   if (difficulty === "sharp") return "Tactical and alert. It blocks threats and builds pressure.";
-  if (gameId === "last-card") return "Uno hand shark. It saves wilds for awkward moments and keeps the table color uncomfortable.";
+  if (gameId === "last-card") return "Color-card shark. It saves wilds for awkward moments and keeps the table color uncomfortable.";
   if (gameId === "darts") return "Checkout hunter. It aims for clean triples and avoids wasting darts near zero.";
   if (gameId === "word-hunt") return "Timed word racer. It keeps hunting while you type and favors longer finds on harder modes.";
   if (gameId === "cup-pong") return "Cup closer. It pressures the middle of the rack and finishes clean.";

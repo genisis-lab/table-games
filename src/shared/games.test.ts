@@ -3,6 +3,7 @@ import {
   applyGameMove,
   chooseBotMove,
   createGameState,
+  finalizeGameState,
   getBoardVariantOptions,
   getGameDefinition,
   isSoloGame,
@@ -275,7 +276,44 @@ describe("New game engines", () => {
     expect(state.meta?.checkers?.kings).toContain("0,3");
   });
 
-  it("records hits in Battleship", () => {
+  it("forces Checkers jumps when a capture is available", () => {
+    const state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[5][0] = "p1";
+    state.board[4][1] = "p2";
+    state.board[5][4] = "p1";
+
+    expect(applyGameMove(state, "p1", { row: 5, column: 4, toRow: 4, toColumn: 5 })).toMatchObject({
+      ok: false,
+      reason: "You must take a jump when one is available."
+    });
+  });
+
+  it("keeps a Checkers turn alive for a multi-jump", () => {
+    let state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[5][0] = "p1";
+    state.board[4][1] = "p2";
+    state.board[2][3] = "p2";
+
+    state = play(state, "p1", { row: 5, column: 0, toRow: 3, toColumn: 2 });
+
+    expect(state.turn).toBe("p1");
+    expect(state.meta?.checkers?.mustContinueFrom).toBe("3,2");
+    expect(applyGameMove(state, "p1", { row: 3, column: 2, toRow: 2, toColumn: 1 })).toMatchObject({
+      ok: false,
+      reason: "You must take a jump when one is available."
+    });
+
+    state = play(state, "p1", { row: 3, column: 2, toRow: 1, toColumn: 4 });
+
+    expect(state.board[1][4]).toBe("p1");
+    expect(state.board[2][3]).toBeNull();
+    expect(state.turn).toBe("p2");
+    expect(state.meta?.checkers?.mustContinueFrom).toBeNull();
+  });
+
+  it("records hits in Sea Battle", () => {
     const state = createGameState("battleship");
     const firstShip = state.meta?.battleship?.botShips[0];
     expect(firstShip).toBeTruthy();
@@ -284,7 +322,7 @@ describe("New game engines", () => {
     expect(next.meta?.battleship?.humanShots[`${firstShip!.row},${firstShip!.column}`]).toBe("hit");
   });
 
-  it("groups Battleship fleets into named ships for sunk-ship reveals", () => {
+  it("groups Sea Battle fleets into named ships for sunk-ship reveals", () => {
     const state = createGameState("battleship");
     const fleet = state.meta?.battleship?.botFleet;
 
@@ -298,11 +336,22 @@ describe("New game engines", () => {
     expect(state.meta?.battleship?.botShips).toHaveLength(17);
   });
 
-  it("registers Flappy Bird as a solo arcade game", () => {
+  it("keeps Sea Battle fleets in-bounds and non-overlapping", () => {
+    const state = createGameState("battleship");
+    const fleet = state.meta?.battleship?.botFleet ?? [];
+    const cells = fleet.flatMap((ship) => ship.cells);
+    const keys = new Set(cells.map((cell) => `${cell.row},${cell.column}`));
+
+    expect(cells).toHaveLength(17);
+    expect(keys.size).toBe(17);
+    expect(cells.every((cell) => cell.row >= 0 && cell.row < 10 && cell.column >= 0 && cell.column < 10)).toBe(true);
+  });
+
+  it("registers Pipe Dash as a solo arcade game", () => {
     const state = createGameState("flappy-bird");
 
     expect(getGameDefinition("flappy-bird")).toMatchObject({
-      name: "Flappy Bird",
+      name: "Pipe Dash",
       supportsFriend: false
     });
     expect(isSoloGame("flappy-bird")).toBe(true);
@@ -325,12 +374,12 @@ describe("New game engines", () => {
     expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
-  it("deals Uno hands and starts on a number discard", () => {
+  it("deals Color Clash hands and starts on a number discard", () => {
     const state = createGameState("last-card");
     const meta = state.meta?.lastCard;
 
     expect(getGameDefinition("last-card")).toMatchObject({
-      name: "Uno",
+      name: "Color Clash",
       supportsFriend: true
     });
     expect(meta?.hands.p1).toHaveLength(7);
@@ -340,7 +389,7 @@ describe("New game engines", () => {
     expect(Number(meta?.discard[0].rank)).not.toBeNaN();
   });
 
-  it("plays Uno matches by color or rank and updates hand counts", () => {
+  it("plays Color Clash matches by color or rank and updates hand counts", () => {
     const state = createGameState("last-card");
     state.meta!.lastCard = {
       deck: [],
@@ -366,7 +415,7 @@ describe("New game engines", () => {
     expect(next.turn).toBe("p2");
   });
 
-  it("applies Uno draw-two as a skipped opponent turn", () => {
+  it("applies Color Clash draw-two as a skipped opponent turn", () => {
     const state = createGameState("last-card");
     state.meta!.lastCard = {
       deck: [
@@ -393,7 +442,7 @@ describe("New game engines", () => {
     expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 2 });
   });
 
-  it("applies Uno wild draw-four and chooses the next table color", () => {
+  it("applies Color Clash wild draw-four and chooses the next table color", () => {
     const state = createGameState("last-card");
     state.meta!.lastCard = {
       deck: [
@@ -425,7 +474,7 @@ describe("New game engines", () => {
     expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 4 });
   });
 
-  it("chooses a sharp Uno action card before a plain match", () => {
+  it("chooses a sharp Color Clash action card before a plain match", () => {
     const state = createGameState("last-card");
     state.turn = "p2";
     state.meta!.lastCard = {
@@ -547,6 +596,24 @@ describe("New table games", () => {
     expect(result.state.winner).toBe("p1");
   });
 
+  it("finalizes an expired Word Hunt snapshot without another submitted word", () => {
+    const state = createGameState("word-hunt");
+    const expired = {
+      ...state,
+      meta: {
+        ...state.meta,
+        wordHunt: {
+          ...state.meta!.wordHunt!,
+          scores: { p1: 2, p2: 6, p3: 0, p4: 0 },
+          roundStartedAt: Date.now() - 5_000,
+          durationMs: 1
+        }
+      }
+    };
+
+    expect(finalizeGameState(expired).winner).toBe("p2");
+  });
+
   it("removes targeted cups and keeps the shooter until both Cup Pong balls are thrown", () => {
     const state = play(createGameState("cup-pong"), "p1", { column: 0 });
 
@@ -594,6 +661,31 @@ describe("Bot move selection", () => {
     state = play(state, "p1", { column: 2 });
 
     expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ column: 3 });
+  });
+
+  it("chooses a Checkers capture instead of a quiet move", () => {
+    const state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[5][0] = "p1";
+    state.board[4][1] = "p2";
+    state.board[5][4] = "p1";
+
+    expect(chooseBotMove(state, "p1", "ruthless")).toEqual({ row: 5, column: 0, toRow: 3, toColumn: 2 });
+  });
+
+  it("targets adjacent water after a Sea Battle hit", () => {
+    const state = createGameState("battleship");
+    state.turn = "p2";
+    state.meta!.battleship!.botShots = { "4,4": "hit" };
+
+    const move = chooseBotMove(state, "p2", "ruthless");
+
+    expect([
+      { row: 3, column: 4 },
+      { row: 5, column: 4 },
+      { row: 4, column: 3 },
+      { row: 4, column: 5 }
+    ]).toContainEqual(move);
   });
 
   it("opens ruthless Four in a Row from an attacking flank instead of the center", () => {
