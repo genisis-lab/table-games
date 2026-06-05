@@ -1268,9 +1268,11 @@ button:disabled {
 
 .dots-wrap,
 .battleship-wrap {
+  position: relative;
   display: grid;
   gap: 12px;
   width: min(100%, var(--large-board-max, 660px), calc(100vh - 300px));
+  overflow: hidden;
 }
 
 .dots-score,
@@ -3101,13 +3103,52 @@ button:disabled {
 }
 
 .darts-table {
+  position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
+  overflow: hidden;
   padding: clamp(14px, 2vw, 24px);
   background:
     radial-gradient(circle at 50% 52%, rgb(255 255 255 / 13%) 0 7%, transparent 8%),
     linear-gradient(135deg, #5d3827, #8c5235 52%, #4c2d20);
+}
+
+.three-game-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.three-game-scene canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.darts-three-scene {
+  opacity: 0.45;
+  filter: saturate(1.08);
+}
+
+.cup-pong-three-scene {
+  opacity: 0.36;
+  mix-blend-mode: screen;
+}
+
+.battleship-three-scene {
+  opacity: 0.46;
+  mix-blend-mode: multiply;
+}
+
+.darts-table > :not(.three-game-scene),
+.cup-pong-table > :not(.three-game-scene),
+.battleship-wrap > :not(.three-game-scene) {
+  position: relative;
+  z-index: 2;
 }
 
 .darts-scoreboard,
@@ -3312,6 +3353,16 @@ button:disabled {
   color: #0d3472;
 }
 
+.word-hunt-header .timer {
+  background: var(--yellow);
+}
+
+.word-hunt-header .timer.danger {
+  background: var(--red);
+  color: #fffdf7;
+  animation: timerPulse 760ms ease-in-out infinite;
+}
+
 .word-hunt-header strong {
   font-size: 1.15rem;
 }
@@ -3405,6 +3456,12 @@ button:disabled {
 .word-list .found {
   background: #fff;
   color: #1659b7;
+}
+
+@keyframes timerPulse {
+  50% {
+    transform: translateY(-2px) scale(1.02);
+  }
 }
 
 .cup-pong-table {

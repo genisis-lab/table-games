@@ -513,14 +513,38 @@ describe("New table games", () => {
   it("generates a unique Word Hunt board and rejects duplicate words", () => {
     const state = createGameState("word-hunt");
     const word = state.meta?.wordHunt?.words[0];
+    const secondWord = state.meta?.wordHunt?.words.find((candidate) => candidate !== word);
     expect(word).toBeTruthy();
+    expect(secondWord).toBeTruthy();
 
     const next = play(state, "p1", { column: 0, word });
     expect(next.meta?.wordHunt?.found.p1).toContain(word);
     expect(next.meta?.wordHunt?.scores.p1).toBeGreaterThan(0);
+    const raced = play(next, "p2", { column: 0, word: secondWord });
+    expect(raced.meta?.wordHunt?.found.p2).toContain(secondWord);
     expect(applyGameMove({ ...next, turn: "p2" }, "p2", { column: 0, word })).toMatchObject({
       ok: false
     });
+  });
+
+  it("ends Word Hunt by timer and awards the highest score", () => {
+    const state = createGameState("word-hunt");
+    const expired = {
+      ...state,
+      meta: {
+        ...state.meta,
+        wordHunt: {
+          ...state.meta!.wordHunt!,
+          scores: { p1: 4, p2: 2, p3: 0, p4: 0 },
+          roundStartedAt: Date.now() - 5_000,
+          durationMs: 1
+        }
+      }
+    };
+
+    const result = applyGameMove(expired, "p2", { column: 0, word: state.meta?.wordHunt?.words[0] });
+    expect(result.ok).toBe(true);
+    expect(result.state.winner).toBe("p1");
   });
 
   it("removes targeted cups and keeps the shooter until both Cup Pong balls are thrown", () => {
