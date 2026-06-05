@@ -7,8 +7,17 @@ import {
   normalizeDominoMeta
 } from "../games/domino/engine";
 import type { DominoMeta, DominoPlayerMark, DominoTile } from "../games/domino/engine";
+import {
+  applyCupPongIntent,
+  chooseCupPongBotMove,
+  createCupPongMeta as createCupPongTableMeta,
+  getCupPongLegalMoves,
+  normalizeCupPongMeta
+} from "../games/cup-pong/engine";
+import type { CupPongMeta, CupPongPlayerMark } from "../games/cup-pong/engine";
 
 export type { DominoMeta, DominoTile } from "../games/domino/engine";
+export type { CupPongMeta } from "../games/cup-pong/engine";
 
 export type GameId =
   | "four-in-a-row"
@@ -48,6 +57,8 @@ export interface GameMove {
   toColumn?: number;
   edge?: "h" | "v";
   word?: string;
+  power?: number;
+  aim?: number;
 }
 
 export interface DotsMeta {
@@ -84,12 +95,6 @@ export interface WordHuntMeta {
   found: Record<PlayerMark, string[]>;
   scores: Record<PlayerMark, number>;
   seed: string;
-}
-
-export interface CupPongMeta {
-  cups: Record<PlayerMark, boolean[]>;
-  made: Record<PlayerMark, number>;
-  streak: Record<PlayerMark, number>;
 }
 
 export interface UltimateMeta {
@@ -1302,31 +1307,19 @@ function applyCupPongMove(state: GameState, player: PlayerMark, move: GameMove):
   const meta = clonedMeta.cupPong;
   if (!meta) return { ok: false, state, reason: "The cups are not ready." };
 
-  const opponent = otherPlayer(player);
-  const target = move.column;
-  if (!Number.isInteger(target) || target < 0 || target >= meta.cups[opponent].length) {
-    return { ok: false, state, reason: "Choose one of the opponent cups." };
-  }
-  if (!meta.cups[opponent][target]) {
-    return { ok: false, state, reason: "That cup is already gone." };
-  }
-
-  meta.cups[opponent][target] = false;
-  meta.made[player] += 1;
-  meta.streak[player] += 1;
-  meta.streak[opponent] = 0;
-  const winner = meta.cups[opponent].some(Boolean) ? null : player;
+  const result = applyCupPongIntent(meta, player as CupPongPlayerMark, move);
+  if (!result.ok) return { ok: false, state, reason: result.reason };
 
   return {
     ok: true,
-    point: { row: 0, column: target },
+    point: result.point,
     state: {
       ...state,
-      turn: winner ? player : opponent,
-      winner,
+      turn: result.nextTurn,
+      winner: result.winner,
       winningLine: [],
       moveCount: state.moveCount + 1,
-      meta: { ...clonedMeta, cupPong: meta }
+      meta: { ...clonedMeta, cupPong: result.meta }
     }
   };
 }
@@ -1609,11 +1602,7 @@ function getWordHuntMoves(state: GameState, player: PlayerMark): GameMove[] {
 function getCupPongMoves(state: GameState, player: PlayerMark): GameMove[] {
   const meta = state.meta?.cupPong;
   if (!meta) return [];
-  const opponent = otherPlayer(player);
-  return meta.cups[opponent]
-    .map((live, column) => ({ live, column }))
-    .filter((cup) => cup.live)
-    .map(({ column }) => ({ column }));
+  return getCupPongLegalMoves(normalizeCupPongMeta(meta), player as CupPongPlayerMark);
 }
 
 function getDominoMoves(state: GameState, player: PlayerMark): GameMove[] {
@@ -1691,11 +1680,9 @@ function chooseCupPongMove(
   legalMoves: GameMove[],
   difficulty: BotDifficulty
 ): GameMove {
-  const opponent = otherPlayer(player);
-  const cups = state.meta?.cupPong?.cups[opponent] ?? [];
-  if (difficulty === "casual") return legalMoves[Math.floor(Math.random() * legalMoves.length)];
-  const center = (cups.length - 1) / 2;
-  return [...legalMoves].sort((a, b) => Math.abs(a.column - center) - Math.abs(b.column - center))[0] ?? legalMoves[0];
+  const meta = state.meta?.cupPong;
+  if (!meta) return legalMoves[0];
+  return chooseCupPongBotMove(normalizeCupPongMeta(meta), player as CupPongPlayerMark, legalMoves, difficulty);
 }
 
 function chooseDominoMove(
@@ -2341,17 +2328,7 @@ function createWordHuntMeta(variant: BoardVariant): WordHuntMeta {
 }
 
 function createCupPongMeta(variant: BoardVariant): CupPongMeta {
-  const cupCount = variant === "party" ? 10 : 6;
-  return {
-    cups: {
-      p1: Array.from({ length: cupCount }, () => true),
-      p2: Array.from({ length: cupCount }, () => true),
-      p3: [],
-      p4: []
-    },
-    made: emptyPlayerNumbers(),
-    streak: emptyPlayerNumbers()
-  };
+  return createCupPongTableMeta(variant);
 }
 
 function createLastCardMeta(): LastCardMeta {

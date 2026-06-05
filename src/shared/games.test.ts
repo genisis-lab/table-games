@@ -523,12 +523,17 @@ describe("New table games", () => {
     });
   });
 
-  it("removes targeted cups in Cup Pong", () => {
+  it("removes targeted cups and keeps the shooter until both Cup Pong balls are thrown", () => {
     const state = play(createGameState("cup-pong"), "p1", { column: 0 });
 
     expect(state.meta?.cupPong?.cups.p2[0]).toBe(false);
     expect(state.meta?.cupPong?.made.p1).toBe(1);
-    expect(state.turn).toBe("p2");
+    expect(state.meta?.cupPong?.ballsRemaining).toBe(1);
+    expect(state.turn).toBe("p1");
+
+    const next = play(state, "p1", { column: 1 });
+    expect(next.meta?.cupPong?.cups.p2[1]).toBe(false);
+    expect(next.turn).toBe("p2");
   });
 
   it("deals four Dominoes hands and starts a matching chain", () => {
