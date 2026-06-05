@@ -16,7 +16,7 @@ import {
   Sparkles,
   UsersRound
 } from "lucide-react";
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
 import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
@@ -1157,29 +1157,146 @@ function CupPongBoard({
   const meta = room.meta?.cupPong;
   if (!meta) return null;
   const targetMark = currentMark ? (currentMark === "p1" ? "p2" : "p1") : room.turn === "p1" ? "p2" : "p1";
+  const targetCups = meta.cups[targetMark] ?? [];
+  const firstLiveTarget = targetCups.findIndex(Boolean);
+  const [selectedCup, setSelectedCup] = useState(firstLiveTarget >= 0 ? firstLiveTarget : 0);
+  const [drag, setDrag] = useState({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 });
+  const padRef = useRef<HTMLDivElement | null>(null);
+  const targetLive = Boolean(targetCups[selectedCup]);
+  const canThrow = canMove && targetLive && !room.winner;
+  const lastThrow = meta.lastThrow;
+  const targetPlayerName = playerNameFor(room.gameId, targetMark);
+  const shooterName = playerNameFor(room.gameId, room.turn);
+  const accuracy = Math.round((drag.active ? 1 - (Math.abs(drag.power - 0.5) * 0.9 + Math.abs(drag.aim) * 0.55) : lastThrow?.accuracy ?? 0) * 100);
+
+  useEffect(() => {
+    const nextLive = targetCups[selectedCup] ? selectedCup : firstLiveTarget;
+    if (nextLive >= 0 && nextLive !== selectedCup) setSelectedCup(nextLive);
+  }, [firstLiveTarget, selectedCup, targetCups]);
+
+  const updateDrag = useCallback((clientX: number, clientY: number, active = true) => {
+    const rect = padRef.current?.getBoundingClientRect();
+    if (!rect) return { aim: 0, power: 0, pullX: 0, pullY: 0 };
+    const originX = rect.left + rect.width / 2;
+    const originY = rect.bottom - 34;
+    const maxX = Math.max(86, rect.width * 0.34);
+    const maxY = Math.max(130, rect.height * 0.72);
+    const pullX = Math.max(-maxX, Math.min(maxX, clientX - originX));
+    const pullY = Math.max(0, Math.min(maxY, originY - clientY));
+    const aim = pullX / maxX;
+    const power = pullY / maxY;
+    const next = { active, aim, power, pullX, pullY };
+    setDrag(next);
+    return next;
+  }, []);
+
+  const beginThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!canThrow) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateDrag(event.clientX, event.clientY);
+  }, [canThrow, updateDrag]);
+
+  const moveThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.active || !canThrow) return;
+    updateDrag(event.clientX, event.clientY);
+  }, [canThrow, drag.active, updateDrag]);
+
+  const finishThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.active) return;
+    const shot = updateDrag(event.clientX, event.clientY, false);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture may already be released on some mobile browsers.
+    }
+    if (!canThrow || shot.power < 0.08) {
+      setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 });
+      return;
+    }
+    onMove({
+      column: selectedCup,
+      power: Math.max(0, Math.min(1, Number(shot.power.toFixed(3)))),
+      aim: Math.max(-1, Math.min(1, Number(shot.aim.toFixed(3))))
+    });
+    window.setTimeout(() => setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 }), 240);
+  }, [canThrow, drag.active, onMove, selectedCup, updateDrag]);
+
   return (
-    <div className="cup-pong-table" role="group" aria-label="Cup Pong table">
+    <div
+      className={`cup-pong-table ${drag.active ? "aiming" : ""} ${lastThrow ? lastThrow.made ? "shot-made" : "shot-missed" : ""}`}
+      role="group"
+      aria-label="Cup Pong table"
+      style={{
+        "--cup-aim": drag.aim,
+        "--cup-power": drag.power,
+        "--cup-pull-x": `${drag.pullX}px`,
+        "--cup-pull-y": `${drag.pullY}px`
+      } as CSSProperties}
+    >
+      <div className="cup-pong-hud">
+        <span><strong>{meta.made.p1}</strong> Blue</span>
+        <span>{meta.ballsRemaining} ball{meta.ballsRemaining === 1 ? "" : "s"}</span>
+        <span>Red <strong>{meta.made.p2}</strong></span>
+      </div>
       <CupRack
         label={playerNameFor(room.gameId, "p2")}
         cups={meta.cups.p2}
         active={targetMark === "p2"}
         canMove={canMove && targetMark === "p2"}
+        selectedCup={targetMark === "p2" ? selectedCup : null}
+        lastThrow={lastThrow}
+        mark="p2"
         lastMove={lastMove}
-        onMove={onMove}
+        onSelect={setSelectedCup}
       />
-      <div className="cup-ball" aria-hidden="true" />
+      <div className="cup-shot-lane">
+        <div className="cup-shot-status">
+          <strong>{room.winner ? "Rack cleared" : canMove ? `Target ${targetPlayerName}` : `${shooterName} lining up`}</strong>
+          <span>{lastThrow ? `${lastThrow.made ? "Sank" : "Missed"} cup ${lastThrow.target + 1}` : "Line up shot"}</span>
+        </div>
+        <div
+          className="cup-throw-pad"
+          ref={padRef}
+          role="button"
+          tabIndex={canThrow ? 0 : -1}
+          aria-disabled={!canThrow}
+          aria-label={canThrow ? `Throw at cup ${selectedCup + 1}` : "Waiting for turn"}
+          onPointerDown={beginThrow}
+          onPointerMove={moveThrow}
+          onPointerUp={finishThrow}
+          onPointerCancel={() => setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 })}
+          onKeyDown={(event) => {
+            if (!canThrow || event.key !== " ") return;
+            event.preventDefault();
+            onMove({ column: selectedCup, power: 0.5, aim: 0 });
+          }}
+        >
+          <div className="cup-arc" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="cup-power-track" aria-hidden="true">
+            <span />
+          </div>
+          <div className="cup-accuracy-chip" aria-hidden="true">{Math.max(0, Math.min(100, accuracy))}%</div>
+          <div className="cup-ball cup-ball-control" aria-hidden="true" />
+        </div>
+      </div>
       <CupRack
         label={playerNameFor(room.gameId, "p1")}
         cups={meta.cups.p1}
         active={targetMark === "p1"}
         canMove={canMove && targetMark === "p1"}
+        selectedCup={targetMark === "p1" ? selectedCup : null}
+        lastThrow={lastThrow}
+        mark="p1"
         lastMove={lastMove}
-        onMove={onMove}
+        onSelect={setSelectedCup}
       />
-      <div className="cup-pong-score">
-        <span>Blue made {meta.made.p1}</span>
-        <span>Red made {meta.made.p2}</span>
-      </div>
+      {meta.redemption.active ? <div className="cup-redemption">Redemption shots</div> : null}
     </div>
   );
 }
@@ -1189,27 +1306,34 @@ function CupRack({
   cups,
   active,
   canMove,
+  selectedCup,
+  lastThrow,
+  mark,
   lastMove,
-  onMove
+  onSelect
 }: {
   label: string;
   cups: boolean[];
   active: boolean;
   canMove: boolean;
+  selectedCup: number | null;
+  lastThrow?: { shooter: PlayerMark; target: number; made: boolean } | null;
+  mark: PlayerMark;
   lastMove: AppliedMove | null;
-  onMove: (move: GameMove) => void;
+  onSelect: (index: number) => void;
 }) {
+  const lastTarget = lastThrow && (lastThrow.shooter === "p1" ? "p2" : "p1") === mark ? lastThrow.target : null;
   return (
     <div className={active ? "cup-rack active" : "cup-rack"} aria-label={label}>
       <strong>{label}</strong>
       <div className={`cup-rack-grid cups-${cups.length}`}>
         {cups.map((live, index) => (
           <button
-            className={`${live ? "live" : "gone"} ${lastMove?.column === index ? "last-move" : ""}`}
+            className={`${live ? "live" : "gone"} ${selectedCup === index ? "selected" : ""} ${lastTarget === index ? lastThrow?.made ? "made-shot" : "missed-shot" : ""} ${lastMove?.column === index ? "last-move" : ""}`}
             type="button"
             disabled={!canMove || !live}
             aria-label={`${label} cup ${index + 1}`}
-            onClick={() => onMove({ column: index })}
+            onClick={() => onSelect(index)}
             key={index}
           />
         ))}
