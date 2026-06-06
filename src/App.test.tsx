@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { reconnectDelayForAttempt, resolveApiOrigin } from "./App";
+import { createRoomOptionsFromSearch, reconnectDelayForAttempt, resolveApiOrigin } from "./App";
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -26,6 +26,26 @@ describe("resolveApiOrigin", () => {
   it("keeps local and explicit API origins unchanged", () => {
     expect(resolveApiOrigin("localhost")).toBe("");
     expect(resolveApiOrigin("table-sparks-game.pages.dev", "https://api.example.test/")).toBe("https://api.example.test");
+  });
+});
+
+describe("createRoomOptionsFromSearch", () => {
+  it("honors direct /new route bot room query options", () => {
+    expect(createRoomOptionsFromSearch("word-hunt", "?opponent=bot&botDifficulty=sharp&boardVariant=wide")).toEqual({
+      opponent: "bot",
+      botDifficulty: "sharp",
+      boardVariant: "wide",
+      botStarts: false
+    });
+  });
+
+  it("supports compact direct-link aliases and validates unavailable options", () => {
+    expect(createRoomOptionsFromSearch("four-in-a-row", "?opponent=bot&difficulty=casual&variant=wide&botStarts=1")).toEqual({
+      opponent: "bot",
+      botDifficulty: "casual",
+      boardVariant: undefined,
+      botStarts: true
+    });
   });
 });
 
