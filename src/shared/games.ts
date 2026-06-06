@@ -1201,8 +1201,7 @@ function applyMorrisMove(state: GameState, player: PlayerMark, move: GameMove): 
     board[point.row][point.column] = null;
     meta.removed[opponent] += 1;
     meta.pendingRemoval = null;
-    const opponentPieces = countPieces(board, opponent);
-    const winner = meta.placed[opponent] >= 9 && opponentPieces < 3 ? player : null;
+    const winner = morrisWinnerAfterTurn(state, board, meta, player);
     return okMove(state, board, player, point, {
       winner,
       meta: { ...cloneMeta(state), morris: meta }
@@ -1239,13 +1238,26 @@ function applyMorrisMove(state: GameState, player: PlayerMark, move: GameMove): 
   }
 
   const opponent = otherPlayer(player);
-  const opponentPieces = countPieces(board, opponent);
-  const winner = meta.placed[opponent] >= 9 && opponentPieces < 3 ? player : null;
+  const winner = meta.pendingRemoval ? null : morrisWinnerAfterTurn(state, board, meta, player);
   return okMove(state, board, player, point, {
     winner,
     nextTurn: meta.pendingRemoval ? player : undefined,
     meta: { ...cloneMeta(state), morris: meta }
   });
+}
+
+function morrisWinnerAfterTurn(state: GameState, board: Cell[][], meta: MorrisMeta, player: PlayerMark): Winner {
+  const opponent = otherPlayer(player);
+  if (meta.placed[opponent] < 9) return null;
+  if (countPieces(board, opponent) < 3) return player;
+
+  const opponentState: GameState = {
+    ...state,
+    board,
+    turn: opponent,
+    meta: { ...cloneMeta(state), morris: { ...meta, pendingRemoval: null } }
+  };
+  return getMorrisMoves(opponentState, opponent).length === 0 ? player : null;
 }
 
 function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {

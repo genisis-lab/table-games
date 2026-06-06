@@ -1199,7 +1199,68 @@ describe("GameRoomView", () => {
     fireEvent.pointerUp(dartboard, { pointerId: 1, clientX: 200, clientY: 40 });
 
     expect(onMove).toHaveBeenCalledWith({ row: 2, column: 0 });
+    expect(dartboard).toHaveClass("throwing");
+    expect(dartboard.querySelector(".dart-hand-dart.in-flight")).not.toBeNull();
+    expect(dartboard.querySelector(".dart-impact.double")).not.toBeNull();
     expect(screen.queryByRole("button", { name: /triple 20/i })).not.toBeInTheDocument();
+  });
+
+  it("lets Darts throws recover when the pointer down is missed", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "darts",
+          board: [[null]],
+          meta: {
+            darts: {
+              targetScore: 301,
+              scores: { p1: 301, p2: 301, p3: 301, p4: 301 },
+              dartsLeft: 3,
+              turnScore: 0,
+              throws: []
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const dartboard = screen.getByRole("button", { name: "Throw dart" });
+    Object.defineProperty(dartboard, "getBoundingClientRect", {
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 400,
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 400,
+        toJSON: () => ({})
+      })
+    });
+    Object.defineProperty(dartboard, "setPointerCapture", { value: vi.fn() });
+    Object.defineProperty(dartboard, "releasePointerCapture", { value: vi.fn() });
+
+    fireEvent.pointerMove(dartboard, { pointerId: 1, buttons: 1, clientX: 200, clientY: 40 });
+    fireEvent.pointerUp(dartboard, { pointerId: 1, clientX: 200, clientY: 40 });
+
+    expect(onMove).toHaveBeenCalledWith({ row: 2, column: 0 });
   });
 
   it("lets Cup Pong drag throws recover when the pointer down is missed", () => {
