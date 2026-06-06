@@ -52,7 +52,7 @@ export interface CupPongMeta {
 	streak: Record<CupPongPlayerMark, number>;
 	/** Balls left in the current shooter's turn. */
 	ballsRemaining: number;
-	/** True when the opponent rack is at a re-rack threshold (6/4/3/2 cups). */
+	/** True when the current shooter's target rack can be usefully re-racked. */
 	reRackAvailable: boolean;
 	redemption: { active: boolean; player: CupPongPlayerMark | null };
 	lastThrow: CupPongThrow | null;
@@ -99,6 +99,18 @@ function liveCupCount(cups: boolean[]): number {
 function packCups(cups: boolean[]): boolean[] {
 	const alive = liveCupCount(cups);
 	return cups.map((_, index) => index < alive);
+}
+
+export function cupRackNeedsReRack(cups: boolean[]): boolean {
+	const remaining = liveCupCount(cups);
+	if (!CUP_PONG_RERACK_THRESHOLDS.has(remaining)) return false;
+	const packed = packCups(cups);
+	return cups.some((live, index) => live !== packed[index]);
+}
+
+export function isCupPongReRackAvailable(meta: CupPongMeta, player: CupPongPlayerMark): boolean {
+	const opponent = otherCupPongPlayer(player);
+	return cupRackNeedsReRack(meta.cups[opponent] ?? []);
 }
 
 // xorshift32 - deterministic given the current seed. Advances meta.seed and
@@ -177,12 +189,11 @@ export function applyCupPongIntent(
 
 	// Re-rack: a reformation request. Does not consume a ball or pass the turn.
 	if (move.column === CUP_PONG_RERACK_MOVE) {
-		const remaining = liveCupCount(meta.cups[opponent]);
-		if (!CUP_PONG_RERACK_THRESHOLDS.has(remaining)) {
-			return { ok: false, reason: "Re-rack is only available at 6, 4, 3, or 2 cups." };
+		if (!cupRackNeedsReRack(meta.cups[opponent])) {
+			return { ok: false, reason: "Re-rack is only available when the opponent rack is scattered at 6, 4, 3, or 2 cups." };
 		}
 		meta.cups[opponent] = packCups(meta.cups[opponent]);
-		meta.reRackAvailable = false;
+		meta.reRackAvailable = isCupPongReRackAvailable(meta, player);
 		meta.lastThrow = null;
 		return { ok: true, point: { row: 0, column: CUP_PONG_RERACK_MOVE }, meta, nextTurn: player, winner: null };
 	}
@@ -214,7 +225,6 @@ export function applyCupPongIntent(
 	};
 
 	const opponentRemaining = liveCupCount(meta.cups[opponent]);
-	meta.reRackAvailable = CUP_PONG_RERACK_THRESHOLDS.has(opponentRemaining);
 	meta.ballsRemaining -= 1;
 
 	let winner: CupPongWinner = null;
@@ -247,15 +257,17 @@ export function applyCupPongIntent(
 		nextTurn = player;
 	}
 
+	meta.reRackAvailable = winner ? false : isCupPongReRackAvailable(meta, nextTurn);
 	return { ok: true, point: { row: 0, column: target }, meta, nextTurn, winner };
 }
 
 export function getCupPongLegalMoves(meta: CupPongMeta, player: CupPongPlayerMark): CupPongMove[] {
 	const opponent = otherCupPongPlayer(player);
-	return meta.cups[opponent]
+	const throwMoves = meta.cups[opponent]
 		.map((live, column) => ({ live, column }))
 		.filter((cup) => cup.live)
 		.map(({ column }) => ({ column }));
+	return isCupPongReRackAvailable(meta, player) ? [{ column: CUP_PONG_RERACK_MOVE }, ...throwMoves] : throwMoves;
 }
 
 export function chooseCupPongBotMove(

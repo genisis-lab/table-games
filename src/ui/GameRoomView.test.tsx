@@ -1397,6 +1397,58 @@ describe("GameRoomView", () => {
     }));
   });
 
+  it("lets Cup Pong players re-rack scattered threshold cups", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "cup-pong",
+          board: [[null]],
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          meta: {
+            cupPong: {
+              cups: {
+                p1: [true, true, true, true, true, true],
+                p2: [false, true, false, true, true, true],
+                p3: [],
+                p4: []
+              },
+              made: { p1: 2, p2: 0, p3: 0, p4: 0 },
+              streak: { p1: 1, p2: 0, p3: 0, p4: 0 },
+              ballsRemaining: 2,
+              reRackAvailable: true,
+              redemption: { active: false, player: null },
+              lastThrow: null,
+              seed: 42
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-rack Red Cups" }));
+
+    expect(onMove).toHaveBeenCalledWith({ column: -1 });
+  });
+
   it("shows legal Nine Men's Morris capture targets after a mill", () => {
     const onMove = vi.fn();
     const morrisBoard = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));

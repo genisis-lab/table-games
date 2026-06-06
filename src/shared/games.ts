@@ -18,6 +18,7 @@ import type { CupPongMeta, CupPongPlayerMark } from "../games/cup-pong/engine";
 
 export type { DominoMeta, DominoTile } from "../games/domino/engine";
 export type { CupPongMeta } from "../games/cup-pong/engine";
+export { isCupPongReRackAvailable } from "../games/cup-pong/engine";
 
 export type GameId =
   | "four-in-a-row"
