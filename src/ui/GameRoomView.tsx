@@ -1217,7 +1217,11 @@ function DartsBoard({
     if (!canMove) return;
     event.preventDefault();
     throwActiveRef.current = true;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Some touch browsers and automation paths do not retain synthetic pointer capture.
+    }
     setThrowPreview(resolvePointerThrow(event));
   };
 
@@ -1227,7 +1231,11 @@ function DartsBoard({
     event.preventDefault();
     if (!throwActiveRef.current) {
       throwActiveRef.current = true;
-      event.currentTarget.setPointerCapture?.(event.pointerId);
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Pointer capture can be unavailable for recovered drags.
+      }
     }
     setThrowPreview(resolvePointerThrow(event));
   };
@@ -1236,7 +1244,11 @@ function DartsBoard({
     if (!throwActiveRef.current || !canMove) return;
     event.preventDefault();
     throwActiveRef.current = false;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The pointer may already be released on mobile browsers.
+    }
     const resolved = resolvePointerThrow(event);
     showDartFlight(resolved);
     onMove(resolved.move);
@@ -1244,7 +1256,11 @@ function DartsBoard({
 
   const cancelThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
     throwActiveRef.current = false;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The pointer may already be released on mobile browsers.
+    }
     setThrowPreview(null);
   };
 
@@ -1880,6 +1896,7 @@ function DominoesBoard({
   const canPass = canMove && legalSidesByIndex.size === 0;
   const teamMode = meta.gameMode !== "free-for-all";
   const tableMode = teamMode ? "Partners" : "Free-for-all";
+  const leadingRound = meta.chain.length === 0;
 
   return (
     <div className={`domino-table ${meta.gameMode}`} role="group" aria-label="Dominoes table">
@@ -1947,7 +1964,7 @@ function DominoesBoard({
       <div className="domino-hand-panel">
         <div className="domino-hand-copy">
           <strong>{currentMark ? "Your hand" : "Spectator view"}</strong>
-          <span>{selectedTile ? `Selected ${selectedTile.left}-${selectedTile.right}` : canMove ? "Pick a tile, then choose an open end." : "Opponent hands stay face down."}</span>
+          <span>{selectedTile ? `Selected ${selectedTile.left}-${selectedTile.right}` : canMove ? leadingRound ? "Pick any tile to lead the round." : "Pick a tile, then choose an open end." : "Opponent hands stay face down."}</span>
         </div>
         <div className="domino-hand" aria-label="Your domino hand">
           {hand.length > 0 ? hand.map((tile, index) => {
@@ -1961,7 +1978,13 @@ function DominoesBoard({
               disabled={!canMove || !playable}
               aria-pressed={selected}
               aria-label={`Select ${tile.left}-${tile.right}`}
-              onClick={() => setSelectedIndex(index)}
+              onClick={() => {
+                if (leadingRound) {
+                  onMove({ column: index, edge: "v" });
+                  return;
+                }
+                setSelectedIndex(index);
+              }}
               key={tile.id}
             >
               <DominoFace tile={tile} />
