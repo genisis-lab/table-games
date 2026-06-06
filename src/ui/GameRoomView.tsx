@@ -19,7 +19,7 @@ import {
   VolumeX
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
+import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, Cell, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
 import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 import { ThreeGameScene } from "./ThreeGameScene";
@@ -44,6 +44,70 @@ interface GameRoomViewProps {
   onSetBoardVariant: (variant: BoardVariant) => void;
   onSetBotDifficulty: (difficulty: BotDifficulty) => void;
   onSetBotStarts?: (botStarts: boolean) => void;
+}
+
+const DARTBOARD_SEGMENTS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5] as const;
+const DARTBOARD_BULL_COLUMN = 20;
+const DARTBOARD_DOUBLE_BULL_COLUMN = 21;
+const DARTBOARD_MISS_COLUMN = -1;
+
+export interface DartThrowResolution {
+  move: GameMove;
+  label: string;
+  score: number;
+  zone: "miss" | "single" | "double" | "triple" | "bull" | "double-bull";
+  xPct: number;
+  yPct: number;
+}
+
+export function resolveDartThrow(x: number, y: number, width: number, height: number): DartThrowResolution {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || width <= 0 || height <= 0) {
+    return dartResolution({ row: 0, column: DARTBOARD_MISS_COLUMN }, "Miss", 0, "miss", 50, 50);
+  }
+
+  const size = Math.max(1, Math.min(width, height));
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const radius = Math.sqrt(dx * dx + dy * dy) / (size / 2);
+  const xPct = clamp((x / width) * 100, 0, 100);
+  const yPct = clamp((y / height) * 100, 0, 100);
+  const degreesFromTop = (Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360;
+  const segmentIndex = Math.floor((degreesFromTop + 9) / 18) % DARTBOARD_SEGMENTS.length;
+  const segment = DARTBOARD_SEGMENTS[segmentIndex];
+
+  if (radius > 0.825) {
+    return dartResolution({ row: 0, column: DARTBOARD_MISS_COLUMN }, "Miss", 0, "miss", xPct, yPct);
+  }
+  if (radius <= 0.047) {
+    return dartResolution({ row: 50, column: DARTBOARD_DOUBLE_BULL_COLUMN }, "Double Bull", 50, "double-bull", xPct, yPct);
+  }
+  if (radius <= 0.092) {
+    return dartResolution({ row: 25, column: DARTBOARD_BULL_COLUMN }, "Bull", 25, "bull", xPct, yPct);
+  }
+  if (radius >= 0.518 && radius <= 0.575) {
+    return dartResolution({ row: 3, column: segmentIndex }, `T${segment}`, segment * 3, "triple", xPct, yPct);
+  }
+  if (radius >= 0.758) {
+    return dartResolution({ row: 2, column: segmentIndex }, `D${segment}`, segment * 2, "double", xPct, yPct);
+  }
+  return dartResolution({ row: 1, column: segmentIndex }, `S${segment}`, segment, "single", xPct, yPct);
+}
+
+function dartResolution(
+  move: GameMove,
+  label: string,
+  score: number,
+  zone: DartThrowResolution["zone"],
+  xPct: number,
+  yPct: number
+): DartThrowResolution {
+  return { move, label, score, zone, xPct, yPct };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function GameRoomView({
@@ -903,21 +967,31 @@ function MorrisBoard({
     "3,0", "3,1", "3,2", "3,4", "3,5", "3,6", "4,2", "4,3", "4,4",
     "5,1", "5,3", "5,5", "6,0", "6,3", "6,6"
   ]);
+  const pendingRemoval = room.meta?.morris?.pendingRemoval ?? null;
+  const removeMode = Boolean(pendingRemoval && pendingRemoval === currentMark);
+  const removable = removeMode && currentMark
+    ? morrisRemovalTargets(room.board, currentMark === "p1" ? "p2" : "p1")
+    : new Set<string>();
 
   return (
-    <div className="morris-board" role="group" aria-label="Nine Men's Morris board">
+    <div className={removeMode ? "morris-board removing" : "morris-board"} role="group" aria-label="Nine Men's Morris board">
       {room.board.flatMap((row, rowIndex) =>
         row.map((cell, columnIndex) => {
           const key = `${rowIndex},${columnIndex}`;
           const playable = points.has(key);
           const isSelected = selected?.row === rowIndex && selected.column === columnIndex;
+          const canRemove = removable.has(key);
           return (
             <button
-              className={`${playable ? "point" : "blank"} ${cell ?? ""} ${isSelected ? "selected" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
+              className={`${playable ? "point" : "blank"} ${cell ?? ""} ${isSelected ? "selected" : ""} ${canRemove ? "removable" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
               type="button"
-              aria-label={`Point ${rowIndex + 1}, ${columnIndex + 1}`}
-              disabled={!canMove || !playable}
+              aria-label={`${canRemove ? "Remove" : "Point"} ${rowIndex + 1}, ${columnIndex + 1}`}
+              disabled={!canMove || !playable || (removeMode && !canRemove)}
               onClick={() => {
+                if (removeMode) {
+                  if (canRemove) onMove({ row: rowIndex, column: columnIndex });
+                  return;
+                }
                 if (cell === currentMark) {
                   setSelected({ row: rowIndex, column: columnIndex });
                   return;
@@ -940,6 +1014,42 @@ function MorrisBoard({
   );
 }
 
+function morrisRemovalTargets(board: Cell[][], opponent: PlayerMark): Set<string> {
+  const occupied = MORRIS_UI_POINTS.filter((key) => cellAtBoard(board, key) === opponent);
+  const exposed = occupied.filter((key) => !morrisUiFormsMill(board, key, opponent));
+  return new Set(exposed.length > 0 ? exposed : occupied);
+}
+
+function morrisUiFormsMill(board: Cell[][], key: string, player: PlayerMark): boolean {
+  return MORRIS_UI_MILLS.some((mill) =>
+    mill.includes(key) && mill.every((pointKey) => cellAtBoard(board, pointKey) === player)
+  );
+}
+
+function cellAtBoard(board: Cell[][], key: string): Cell | undefined {
+  const [row, column] = key.split(",").map(Number);
+  return board[row]?.[column];
+}
+
+const MORRIS_UI_POINTS = [
+  "0,0", "0,3", "0,6",
+  "1,1", "1,3", "1,5",
+  "2,2", "2,3", "2,4",
+  "3,0", "3,1", "3,2", "3,4", "3,5", "3,6",
+  "4,2", "4,3", "4,4",
+  "5,1", "5,3", "5,5",
+  "6,0", "6,3", "6,6"
+];
+
+const MORRIS_UI_MILLS = [
+  ["0,0", "0,3", "0,6"], ["1,1", "1,3", "1,5"], ["2,2", "2,3", "2,4"],
+  ["3,0", "3,1", "3,2"], ["3,4", "3,5", "3,6"], ["4,2", "4,3", "4,4"],
+  ["5,1", "5,3", "5,5"], ["6,0", "6,3", "6,6"], ["0,0", "3,0", "6,0"],
+  ["1,1", "3,1", "5,1"], ["2,2", "3,2", "4,2"], ["0,3", "1,3", "2,3"],
+  ["4,3", "5,3", "6,3"], ["2,4", "3,4", "4,4"], ["1,5", "3,5", "5,5"],
+  ["0,6", "3,6", "6,6"]
+];
+
 const LAST_CARD_DRAW_COLUMN = -1;
 
 function LastCardBoard({
@@ -959,7 +1069,8 @@ function LastCardBoard({
 
   const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
   const deckCount = meta.deckCount ?? meta.deck.length;
-  const canDraw = canMove && (deckCount > 0 || meta.discard.length > 1);
+  const hasPlayableCard = hand.some((card) => lastCardPlayable(card, topCard, meta.currentColor, hand));
+  const canDraw = canMove && !hasPlayableCard && (deckCount > 0 || meta.discard.length > 1);
 
   return (
     <div className="last-card-table" role="group" aria-label="Color Clash table">
@@ -997,7 +1108,10 @@ function LastCardBoard({
 
       <div className="last-card-event" aria-live="polite">
         {meta.lastDraw ? (
-          <span>{playerNameFor(room.gameId, meta.lastDraw.player)} drew {meta.lastDraw.count}</span>
+          <span>
+            {playerNameFor(room.gameId, meta.lastDraw.player)} drew {meta.lastDraw.count}
+            {meta.lastDraw.playable ? " and can play it" : ""}
+          </span>
         ) : meta.lastAction && lastCardIsWildAction(meta.lastAction) ? (
           <span>{lastCardRankLabel(meta.lastAction)} changed color to {lastCardColorName(meta.currentColor)}</span>
         ) : meta.lastAction && lastCardIsAction(meta.lastAction) ? (
@@ -1010,7 +1124,7 @@ function LastCardBoard({
       <div className="last-card-hand" aria-label={currentMark ? "Your hand" : "Spectator hand view"}>
         {currentMark && hand.length > 0 ? (
           hand.map((card, index) => {
-            const playable = lastCardPlayable(card, topCard, meta.currentColor);
+            const playable = lastCardPlayable(card, topCard, meta.currentColor, hand);
             return (
               <button
                 className={`last-card-hand-card ${card.color} ${playable ? "playable" : ""}`}
@@ -1044,9 +1158,72 @@ function DartsBoard({
   canMove: boolean;
   onMove: (move: GameMove) => void;
 }) {
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const throwActiveRef = useRef(false);
+  const previewTimeoutRef = useRef<number | null>(null);
+  const [throwPreview, setThrowPreview] = useState<DartThrowResolution | null>(null);
   const meta = room.meta?.darts;
+
+  useEffect(() => {
+    throwActiveRef.current = false;
+    setThrowPreview(null);
+  }, [meta?.throws.length, meta?.dartsLeft, room.turn]);
+
+  useEffect(() => {
+    return () => {
+      if (previewTimeoutRef.current !== null) window.clearTimeout(previewTimeoutRef.current);
+    };
+  }, []);
+
   if (!meta) return null;
-  const segments = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+
+  const resolvePointerThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return resolveDartThrow(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+  };
+
+  const beginThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!canMove) return;
+    event.preventDefault();
+    throwActiveRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setThrowPreview(resolvePointerThrow(event));
+  };
+
+  const aimThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!throwActiveRef.current || !canMove) return;
+    event.preventDefault();
+    setThrowPreview(resolvePointerThrow(event));
+  };
+
+  const finishThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!throwActiveRef.current || !canMove) return;
+    event.preventDefault();
+    throwActiveRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const resolved = resolvePointerThrow(event);
+    setThrowPreview(resolved);
+    onMove(resolved.move);
+    if (previewTimeoutRef.current !== null) window.clearTimeout(previewTimeoutRef.current);
+    previewTimeoutRef.current = window.setTimeout(() => setThrowPreview(null), 420);
+  };
+
+  const cancelThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
+    throwActiveRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setThrowPreview(null);
+  };
+
+  const throwFromKeyboard = () => {
+    if (!canMove) return;
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      onMove({ row: 3, column: 0 });
+      return;
+    }
+    onMove(resolveDartThrow(rect.width / 2, rect.height * 0.225, rect.width, rect.height).move);
+  };
+
   return (
     <div className="darts-table" role="group" aria-label="Darts board">
       <ThreeGameScene kind="darts" stateKey={`${meta.throws.length}-${meta.dartsLeft}-${meta.scores.p1}-${meta.scores.p2}`} intensity={meta.throws.length % 3} />
@@ -1062,9 +1239,25 @@ function DartsBoard({
           <strong>{meta.dartsLeft}</strong>
         </div>
       </div>
-      <div className="dartboard">
+      <div
+        className={`dartboard ${canMove ? "can-throw" : "waiting"} ${throwPreview ? "aiming" : ""}`}
+        ref={boardRef}
+        role="button"
+        tabIndex={canMove ? 0 : -1}
+        aria-label={canMove ? "Throw dart" : "Waiting for turn"}
+        aria-disabled={!canMove}
+        onPointerDown={beginThrow}
+        onPointerMove={aimThrow}
+        onPointerUp={finishThrow}
+        onPointerCancel={cancelThrow}
+        onKeyDown={(event) => {
+          if (event.key !== " " && event.key !== "Enter") return;
+          event.preventDefault();
+          throwFromKeyboard();
+        }}
+      >
         <div className="dart-number-ring" aria-hidden="true">
-          {segments.map((segment, index) => {
+          {DARTBOARD_SEGMENTS.map((segment, index) => {
             const angle = index * 18 - 90;
             const radius = 43;
             const x = 50 + Math.cos((angle * Math.PI) / 180) * radius;
@@ -1074,25 +1267,33 @@ function DartsBoard({
             );
           })}
         </div>
-        {segments.map((segment, index) => (
-          <div
-            className="dart-slice"
-            style={{ "--slice": index } as CSSProperties}
-            key={segment}
+        {throwPreview ? (
+          <span
+            className={`dart-aim-reticle ${throwPreview.zone}`}
+            style={{ left: `${throwPreview.xPct}%`, top: `${throwPreview.yPct}%` }}
+            aria-hidden="true"
           >
-            <button type="button" disabled={!canMove} aria-label={`Triple ${segment}`} onClick={() => onMove({ row: 3, column: index })}>T{segment}</button>
-            <button type="button" disabled={!canMove} aria-label={`Single ${segment}`} onClick={() => onMove({ row: 1, column: index })}>{segment}</button>
-            <button type="button" disabled={!canMove} aria-label={`Double ${segment}`} onClick={() => onMove({ row: 2, column: index })}>D{segment}</button>
-          </div>
-        ))}
-        <button className="dart-bull outer" type="button" disabled={!canMove} onClick={() => onMove({ row: 25, column: 20 })}>25</button>
-        <button className="dart-bull inner" type="button" disabled={!canMove} onClick={() => onMove({ row: 50, column: 21 })}>50</button>
+            <span>{throwPreview.score > 0 ? `${throwPreview.label} ${throwPreview.score}` : throwPreview.label}</span>
+          </span>
+        ) : null}
+        <span
+          className="dart-hand-dart"
+          style={{
+            left: throwPreview ? `${throwPreview.xPct}%` : "50%",
+            top: throwPreview ? `${throwPreview.yPct}%` : "112%"
+          }}
+          aria-hidden="true"
+        />
         <span className="dart-throw-line" aria-hidden="true" />
       </div>
       <div className="dart-throws">
-        {meta.throws.length > 0 ? meta.throws.slice(-5).map((throwItem, index) => (
+        {throwPreview ? (
+          <span className={`dart-preview-pill ${throwPreview.zone}`}>
+            {throwPreview.score > 0 ? `${throwPreview.label} · ${throwPreview.score}` : throwPreview.label}
+          </span>
+        ) : meta.throws.length > 0 ? meta.throws.slice(-5).map((throwItem, index) => (
           <span key={`${throwItem.player}-${throwItem.label}-${index}`}>{throwItem.label}</span>
-        )) : <span>Aim for the clean checkout.</span>}
+        )) : <span>Clean checkout.</span>}
       </div>
     </div>
   );
@@ -1110,6 +1311,16 @@ function WordHuntBoard({
   onMove: (move: GameMove) => void;
 }) {
   const [word, setWord] = useState("");
+  const [selectedCells, setSelectedCells] = useState<BoardPoint[]>([]);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const pathRef = useRef<BoardPoint[]>([]);
+  const pathActiveRef = useRef(false);
+  const touchApiRef = useRef<{
+    start: (event: TouchEvent) => void;
+    move: (event: TouchEvent) => void;
+    end: (event: TouchEvent) => void;
+    cancel: (event: TouchEvent) => void;
+  } | null>(null);
   const [now, setNow] = useState(Date.now());
   const meta = room.meta?.wordHunt;
   useEffect(() => {
@@ -1117,6 +1328,31 @@ function WordHuntBoard({
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [meta, room.winner]);
+  useEffect(() => {
+    pathActiveRef.current = false;
+    pathRef.current = [];
+    setSelectedCells([]);
+    setWord("");
+  }, [meta?.seed, currentMark]);
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return undefined;
+    const start = (event: TouchEvent) => touchApiRef.current?.start(event);
+    const move = (event: TouchEvent) => touchApiRef.current?.move(event);
+    const end = (event: TouchEvent) => touchApiRef.current?.end(event);
+    const cancel = (event: TouchEvent) => touchApiRef.current?.cancel(event);
+    const options = { passive: false };
+    grid.addEventListener("touchstart", start, options);
+    grid.addEventListener("touchmove", move, options);
+    grid.addEventListener("touchend", end, options);
+    grid.addEventListener("touchcancel", cancel, options);
+    return () => {
+      grid.removeEventListener("touchstart", start);
+      grid.removeEventListener("touchmove", move);
+      grid.removeEventListener("touchend", end);
+      grid.removeEventListener("touchcancel", cancel);
+    };
+  }, [meta?.seed]);
   if (!meta) return null;
   const found = new Set((["p1", "p2", "p3", "p4"] as PlayerMark[]).flatMap((mark) => meta.found[mark] ?? []));
   const durationMs = meta.durationMs || (meta.size === 5 ? 120_000 : 90_000);
@@ -1125,12 +1361,107 @@ function WordHuntBoard({
   const remainingSeconds = Math.ceil(remainingMs / 1000);
   const canSubmit = canMove && remainingMs > 0;
   const foundCount = found.size;
+  const selectedKeys = new Set(selectedCells.map(wordCellKey));
+  const selectedWord = selectedCells.map((cell) => meta.letters[cell.row]?.[cell.column] ?? "").join("");
   const submitWord = (event: FormEvent) => {
     event.preventDefault();
     const clean = word.trim().toUpperCase();
     if (!clean || !canSubmit) return;
     onMove({ column: 0, word: clean });
     setWord("");
+    clearWordPath();
+  };
+  const clearWordPath = () => {
+    pathActiveRef.current = false;
+    pathRef.current = [];
+    setSelectedCells([]);
+  };
+  const syncPath = (path: BoardPoint[]) => {
+    pathRef.current = path;
+    setSelectedCells(path);
+    setWord(path.map((cell) => meta.letters[cell.row]?.[cell.column] ?? "").join(""));
+  };
+  const appendCellToPath = (point: BoardPoint) => {
+    const path = pathRef.current;
+    const existingIndex = path.findIndex((cell) => cell.row === point.row && cell.column === point.column);
+    if (existingIndex >= 0) {
+      if (existingIndex === path.length - 2) syncPath(path.slice(0, -1));
+      return;
+    }
+    const last = path.at(-1);
+    if (last && Math.max(Math.abs(last.row - point.row), Math.abs(last.column - point.column)) > 1) return;
+    syncPath([...path, point]);
+  };
+  const cellFromClient = (clientX: number, clientY: number, target: EventTarget | null): BoardPoint | null => {
+    const element =
+      document.elementFromPoint?.(clientX, clientY)?.closest<HTMLElement>("[data-word-cell]") ??
+      (target instanceof Element ? target.closest<HTMLElement>("[data-word-cell]") : null);
+    if (!element || !gridRef.current?.contains(element)) return null;
+    const row = Number(element.dataset.row);
+    const column = Number(element.dataset.column);
+    return Number.isInteger(row) && Number.isInteger(column) ? { row, column } : null;
+  };
+  const cellFromPointer = (event: ReactPointerEvent<HTMLDivElement>): BoardPoint | null =>
+    cellFromClient(event.clientX, event.clientY, event.target);
+  const submitSelectedPath = () => {
+    const clean = pathRef.current.map((cell) => meta.letters[cell.row]?.[cell.column] ?? "").join("");
+    if (canSubmit && clean.length >= 3) onMove({ column: 0, word: clean });
+    setWord("");
+    clearWordPath();
+  };
+  const beginPath = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    if (!canSubmit) return;
+    const point = cellFromPointer(event);
+    if (!point) return;
+    event.preventDefault();
+    pathActiveRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    syncPath([point]);
+  };
+  const movePath = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    if (!pathActiveRef.current || !canSubmit) return;
+    event.preventDefault();
+    const point = cellFromPointer(event);
+    if (point) appendCellToPath(point);
+  };
+  const finishPath = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    if (!pathActiveRef.current) return;
+    event.preventDefault();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    submitSelectedPath();
+  };
+  touchApiRef.current = {
+    start: (event: TouchEvent) => {
+      if (!canSubmit) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      const point = cellFromClient(touch.clientX, touch.clientY, event.target);
+      if (!point) return;
+      event.preventDefault();
+      pathActiveRef.current = true;
+      syncPath([point]);
+    },
+    move: (event: TouchEvent) => {
+      if (!pathActiveRef.current || !canSubmit) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      event.preventDefault();
+      const point = cellFromClient(touch.clientX, touch.clientY, event.target);
+      if (point) appendCellToPath(point);
+    },
+    end: (event: TouchEvent) => {
+      if (!pathActiveRef.current) return;
+      event.preventDefault();
+      submitSelectedPath();
+    },
+    cancel: (event: TouchEvent) => {
+      event.preventDefault();
+      clearWordPath();
+      setWord("");
+    }
   };
   return (
     <div className="word-hunt-table" role="group" aria-label="Word Hunt board">
@@ -1147,21 +1478,56 @@ function WordHuntBoard({
           Found <strong>{foundCount}/{meta.words.length}</strong>
         </span>
       </div>
-      <div className="word-grid" style={{ "--word-size": meta.size } as CSSProperties}>
+      <div
+        className={`word-grid ${canSubmit ? "can-select" : "locked"}`}
+        ref={gridRef}
+        style={{ "--word-size": meta.size } as CSSProperties}
+        onPointerDown={beginPath}
+        onPointerMove={movePath}
+        onPointerUp={finishPath}
+        onPointerCancel={(event) => {
+          if (event.pointerType === "touch") return;
+          event.currentTarget.releasePointerCapture?.(event.pointerId);
+          clearWordPath();
+          setWord("");
+        }}
+      >
         {meta.letters.flatMap((row, rowIndex) =>
-          row.map((letter, columnIndex) => (
-            <span key={`${rowIndex}-${columnIndex}`}>{letter}</span>
-          ))
+          row.map((letter, columnIndex) => {
+            const key = `${rowIndex}-${columnIndex}`;
+            const selected = selectedKeys.has(wordCellKey({ row: rowIndex, column: columnIndex }));
+            const lastSelected = selectedCells.at(-1)?.row === rowIndex && selectedCells.at(-1)?.column === columnIndex;
+            return (
+              <button
+                className={`${selected ? "selected" : ""} ${lastSelected ? "path-last" : ""}`}
+                type="button"
+                aria-label={`Letter ${letter} at ${rowIndex + 1}, ${columnIndex + 1}`}
+                disabled={!canSubmit}
+                data-word-cell="true"
+                data-row={rowIndex}
+                data-column={columnIndex}
+                onPointerEnter={() => {
+                  if (pathActiveRef.current && canSubmit) appendCellToPath({ row: rowIndex, column: columnIndex });
+                }}
+                key={key}
+              >
+                {letter}
+              </button>
+            );
+          })
         )}
       </div>
       <form className="word-entry" onSubmit={submitWord}>
         <label htmlFor="word-hunt-input">Word</label>
         <input
           id="word-hunt-input"
-          value={word}
+          value={selectedWord || word}
           disabled={!canSubmit}
           autoCapitalize="characters"
-          onChange={(event) => setWord(event.target.value)}
+          onChange={(event) => {
+            clearWordPath();
+            setWord(event.target.value);
+          }}
           placeholder={currentMark ? remainingMs > 0 ? "TYPE WORD" : "TIME UP" : "WATCHING"}
         />
         <button className="primary-button" type="submit" disabled={!canSubmit || word.trim().length < 2}>Find</button>
@@ -1186,6 +1552,10 @@ function formatClock(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function wordCellKey(point: BoardPoint): string {
+  return `${point.row},${point.column}`;
+}
+
 function CupPongBoard({
   room,
   canMove,
@@ -1206,6 +1576,7 @@ function CupPongBoard({
   const firstLiveTarget = targetCups.findIndex(Boolean);
   const [selectedCup, setSelectedCup] = useState(firstLiveTarget >= 0 ? firstLiveTarget : 0);
   const [drag, setDrag] = useState({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 });
+  const dragRef = useRef(drag);
   const padRef = useRef<HTMLDivElement | null>(null);
   const targetLive = Boolean(targetCups[selectedCup]);
   const canThrow = canMove && targetLive && !room.winner;
@@ -1231,23 +1602,38 @@ function CupPongBoard({
     const aim = pullX / maxX;
     const power = pullY / maxY;
     const next = { active, aim, power, pullX, pullY };
+    dragRef.current = next;
     setDrag(next);
     return next;
   }, []);
 
+  const resetDrag = useCallback(() => {
+    const next = { active: false, aim: 0, power: 0, pullX: 0, pullY: 0 };
+    dragRef.current = next;
+    setDrag(next);
+  }, []);
+
   const beginThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!canThrow) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browser automation and mobile browsers do not retain capture for synthetic input.
+    }
     updateDrag(event.clientX, event.clientY);
   }, [canThrow, updateDrag]);
 
   const moveThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.active || !canThrow) return;
+    const pressed = event.buttons > 0;
+    if (!canThrow || (!dragRef.current.active && !pressed)) return;
+    event.preventDefault();
     updateDrag(event.clientX, event.clientY);
-  }, [canThrow, drag.active, updateDrag]);
+  }, [canThrow, updateDrag]);
 
   const finishThrow = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.active) return;
+    if (!dragRef.current.active) return;
+    event.preventDefault();
     const shot = updateDrag(event.clientX, event.clientY, false);
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1255,7 +1641,7 @@ function CupPongBoard({
       // Pointer capture may already be released on some mobile browsers.
     }
     if (!canThrow || shot.power < 0.08) {
-      setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 });
+      resetDrag();
       return;
     }
     onMove({
@@ -1263,8 +1649,8 @@ function CupPongBoard({
       power: Math.max(0, Math.min(1, Number(shot.power.toFixed(3)))),
       aim: Math.max(-1, Math.min(1, Number(shot.aim.toFixed(3))))
     });
-    window.setTimeout(() => setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 }), 240);
-  }, [canThrow, drag.active, onMove, selectedCup, updateDrag]);
+    window.setTimeout(resetDrag, 240);
+  }, [canThrow, onMove, resetDrag, selectedCup, updateDrag]);
 
   return (
     <div
@@ -1314,7 +1700,7 @@ function CupPongBoard({
           onPointerDown={beginThrow}
           onPointerMove={moveThrow}
           onPointerUp={finishThrow}
-          onPointerCancel={() => setDrag({ active: false, aim: 0, power: 0, pullX: 0, pullY: 0 })}
+          onPointerCancel={resetDrag}
           onKeyDown={(event) => {
             if (!canThrow || event.key !== " ") return;
             event.preventDefault();
@@ -2444,7 +2830,15 @@ function LastCardFace({ card }: { card: LastCardCard }) {
   );
 }
 
-function lastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardCard["color"]): boolean {
+function lastCardPlayable(
+  card: LastCardCard,
+  top: LastCardCard,
+  currentColor: LastCardCard["color"],
+  hand: LastCardCard[] = []
+): boolean {
+  if (card.rank === "wild4" && hand.some((candidate) => candidate !== card && candidate.color === currentColor)) {
+    return false;
+  }
   return card.color === "wild" || card.color === currentColor || card.rank === top.rank;
 }
 
@@ -2523,8 +2917,8 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
-  if (gameId === "last-card") return "Match the top card by color or rank. Skips and reverses bounce the turn, +2 and wild +4 make the other side draw.";
-  if (gameId === "darts") return "Take three throws per turn and race down to exactly zero.";
+  if (gameId === "last-card") return "Match the top card by color or rank. Skips and reverses bounce the turn, +2 draws two, and Wild +4 is only for hands with no active-color card.";
+  if (gameId === "darts") return "Take three throws per turn and finish exactly on a double.";
   if (gameId === "word-hunt") return "Find as many connected words as you can before the timer ends. Longer words score more, and each word can be claimed once.";
   if (gameId === "cup-pong") return "Pick an opponent cup to sink it. Clear the other rack before yours disappears.";
   if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Cell } from "../shared/games";
 import type { AppliedMove } from "../shared/protocol";
 import type { RoomSnapshot } from "../shared/protocol";
-import { advanceSnakeRun, createFlappyRun, createSnakeRun, GameRoomView, queueSnakeTurn } from "./GameRoomView";
+import { advanceSnakeRun, createFlappyRun, createSnakeRun, GameRoomView, queueSnakeTurn, resolveDartThrow } from "./GameRoomView";
 
 const room: RoomSnapshot = {
   roomId: "room-test",
@@ -608,9 +608,166 @@ describe("GameRoomView", () => {
     expect(onMove).toHaveBeenCalledWith({ column: 0 });
 
     expect(screen.getByRole("button", { name: "Play green 2" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Draw a card" })).toBeDisabled();
+  });
+
+  it("lets Word Hunt players drag adjacent letters into a submitted word", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "word-hunt",
+          opponent: "bot",
+          board: [[null]],
+          meta: {
+            wordHunt: {
+              size: 4,
+              letters: [
+                ["C", "A", "T", "S"],
+                ["R", "E", "N", "D"],
+                ["L", "O", "P", "K"],
+                ["M", "I", "G", "H"]
+              ],
+              words: ["CAT", "CATS", "TEN"],
+              found: { p1: [], p2: [], p3: [], p4: [] },
+              scores: { p1: 0, p2: 0, p3: 0, p4: 0 },
+              seed: "test-seed",
+              roundStartedAt: Date.now(),
+              durationMs: 60_000
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const grid = screen.getByRole("group", { name: "Word Hunt board" }).querySelector(".word-grid")!;
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Letter C at 1, 1" }));
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Letter A at 1, 2" }));
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Letter T at 1, 3" }));
+    expect(screen.getByLabelText("Word")).toHaveValue("CAT");
+
+    fireEvent.pointerUp(grid);
+    expect(onMove).toHaveBeenCalledWith({ column: 0, word: "CAT" });
+  });
+
+  it("enables Color Clash draw only when the hand has no playable card", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "last-card",
+          opponent: "bot",
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          board: [[null]],
+          meta: {
+            lastCard: {
+              deck: [{ id: "red-9-a", color: "red", rank: "9" }],
+              deckCount: 1,
+              discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+              hands: {
+                p1: [
+                  { id: "green-2-a", color: "green", rank: "2" },
+                  { id: "blue-7-a", color: "blue", rank: "7" }
+                ],
+                p2: [],
+                p3: [],
+                p4: []
+              },
+              handCounts: { p1: 2, p2: 7, p3: 0, p4: 0 },
+              currentColor: "red"
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Draw a card" }));
     expect(onMove).toHaveBeenCalledWith({ column: -1 });
+  });
+
+  it("disables Color Clash Wild +4 while the player can follow color", () => {
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "last-card",
+          opponent: "bot",
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          board: [[null]],
+          meta: {
+            lastCard: {
+              deck: [],
+              deckCount: 0,
+              discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+              hands: {
+                p1: [
+                  { id: "wild-four-a", color: "wild", rank: "wild4" },
+                  { id: "red-7-a", color: "red", rank: "7" }
+                ],
+                p2: [],
+                p3: [],
+                p4: []
+              },
+              handCounts: { p1: 2, p2: 7, p3: 0, p4: 0 },
+              currentColor: "red"
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Play wild Wild +4" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Play red 7" })).not.toBeDisabled();
   });
 
   it("starts Pipe Dash only from the start button while ready", () => {
@@ -966,6 +1123,204 @@ describe("GameRoomView", () => {
       gridRow: "2 / span 1",
       gridColumn: "2 / span 2"
     });
+  });
+
+  it("maps Darts aim coordinates to real board scoring zones", () => {
+    expect(resolveDartThrow(200, 200, 400, 400)).toMatchObject({
+      label: "Double Bull",
+      score: 50,
+      move: { row: 50, column: 21 }
+    });
+    expect(resolveDartThrow(200, 40, 400, 400)).toMatchObject({
+      label: "D20",
+      score: 40,
+      move: { row: 2, column: 0 }
+    });
+    expect(resolveDartThrow(200, 6, 400, 400)).toMatchObject({
+      label: "Miss",
+      score: 0,
+      move: { row: 0, column: -1 }
+    });
+  });
+
+  it("throws a dart from pointer release instead of hidden score buttons", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "darts",
+          board: [[null]],
+          meta: {
+            darts: {
+              targetScore: 301,
+              scores: { p1: 301, p2: 301, p3: 301, p4: 301 },
+              dartsLeft: 3,
+              turnScore: 0,
+              throws: []
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const dartboard = screen.getByRole("button", { name: "Throw dart" });
+    Object.defineProperty(dartboard, "getBoundingClientRect", {
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 400,
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 400,
+        toJSON: () => ({})
+      })
+    });
+    Object.defineProperty(dartboard, "setPointerCapture", { value: vi.fn() });
+    Object.defineProperty(dartboard, "releasePointerCapture", { value: vi.fn() });
+
+    fireEvent.pointerDown(dartboard, { pointerId: 1, clientX: 200, clientY: 40 });
+    fireEvent.pointerUp(dartboard, { pointerId: 1, clientX: 200, clientY: 40 });
+
+    expect(onMove).toHaveBeenCalledWith({ row: 2, column: 0 });
+    expect(screen.queryByRole("button", { name: /triple 20/i })).not.toBeInTheDocument();
+  });
+
+  it("lets Cup Pong drag throws recover when the pointer down is missed", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "cup-pong",
+          board: [[null]],
+          players: [
+            room.players[0],
+            { ...room.players[1], name: "Spark Bot", isBot: true }
+          ],
+          meta: {
+            cupPong: {
+              cups: {
+                p1: [true, true, true, true, true, true],
+                p2: [true, true, true, true, true, true],
+                p3: [],
+                p4: []
+              },
+              made: { p1: 0, p2: 0, p3: 0, p4: 0 },
+              streak: { p1: 0, p2: 0, p3: 0, p4: 0 },
+              ballsRemaining: 2,
+              reRackAvailable: false,
+              redemption: { active: false, player: null },
+              lastThrow: null,
+              seed: 42
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const pad = screen.getByRole("button", { name: "Throw at cup 1" });
+    Object.defineProperty(pad, "getBoundingClientRect", {
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 420,
+        bottom: 190,
+        x: 0,
+        y: 0,
+        width: 420,
+        height: 190,
+        toJSON: () => ({})
+      })
+    });
+
+    fireEvent.pointerMove(pad, { pointerId: 1, buttons: 1, clientX: 210, clientY: 144 });
+    fireEvent.pointerMove(pad, { pointerId: 1, buttons: 1, clientX: 210, clientY: 42 });
+    fireEvent.pointerUp(pad, { pointerId: 1, clientX: 210, clientY: 42 });
+
+    expect(onMove).toHaveBeenCalledWith(expect.objectContaining({
+      column: 0,
+      aim: 0
+    }));
+  });
+
+  it("shows legal Nine Men's Morris capture targets after a mill", () => {
+    const onMove = vi.fn();
+    const morrisBoard = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));
+    morrisBoard[0][0] = "p1";
+    morrisBoard[0][3] = "p1";
+    morrisBoard[0][6] = "p1";
+    morrisBoard[1][1] = "p2";
+    morrisBoard[1][3] = "p2";
+    morrisBoard[1][5] = "p2";
+    morrisBoard[3][0] = "p2";
+
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "nine-mens-morris",
+          board: morrisBoard,
+          turn: "p1",
+          meta: {
+            morris: {
+              placed: { p1: 9, p2: 9, p3: 0, p4: 0 },
+              removed: { p1: 0, p2: 0, p3: 0, p4: 0 },
+              pendingRemoval: "p1"
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Point 2, 2" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove 4, 1" }));
+
+    expect(onMove).toHaveBeenCalledWith({ row: 3, column: 0 });
   });
 
   it("shows rules and move history without live undo controls", () => {

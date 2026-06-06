@@ -67,6 +67,9 @@ const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
 const BOT_NAME = "Spark Bot";
 const BOT_MOVE_DELAY_MS = 520;
+const DARTS_SEGMENTS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5] as const;
+const DARTS_BULL_INDEX = 20;
+const DARTS_DOUBLE_BULL_INDEX = 21;
 
 export class GameRoom extends DurableObject<Env> {
   private room: StoredRoom | null = null;
@@ -283,7 +286,8 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
-    const result = applyGameMove(room.game, player.mark, move);
+    const previousGame = room.game;
+    const result = applyGameMove(previousGame, player.mark, move);
     if (!result.ok) {
       this.send(ws, { type: "error", reason: result.reason });
       return;
@@ -291,7 +295,7 @@ export class GameRoom extends DurableObject<Env> {
 
     room.gameHistory = [...room.gameHistory, cloneGameState(room.game)].slice(-30);
     room.game = result.state;
-    room.moveHistory = [...room.moveHistory, createMoveRecord(player, move, result.point, room.gameId)].slice(-40);
+    room.moveHistory = [...room.moveHistory, createMoveRecord(player, move, result.point, room.gameId, previousGame)].slice(-40);
     room.undoRequests = [];
     room.rematchRequests = [];
     room.updatedAt = Date.now();
@@ -617,12 +621,13 @@ export class GameRoom extends DurableObject<Env> {
     const move = chooseBotMove(room.game, bot.mark, room.botDifficulty);
     if (!move) return;
 
-    const result = applyGameMove(room.game, bot.mark, move);
+    const previousGame = room.game;
+    const result = applyGameMove(previousGame, bot.mark, move);
     if (!result.ok) return;
 
     room.gameHistory = [...room.gameHistory, cloneGameState(room.game)].slice(-30);
     room.game = result.state;
-    room.moveHistory = [...room.moveHistory, createMoveRecord(bot, move, result.point, room.gameId)].slice(-40);
+    room.moveHistory = [...room.moveHistory, createMoveRecord(bot, move, result.point, room.gameId, previousGame)].slice(-40);
     room.undoRequests = [];
     room.rematchRequests = [];
     room.updatedAt = Date.now();
@@ -852,13 +857,14 @@ function createMoveRecord(
   player: RoomPlayer,
   move: GameMove,
   point: { row: number; column: number },
-  gameId: GameId
+  gameId: GameId,
+  previousGame?: GameState
 ): MoveRecord {
   return {
     id: crypto.randomUUID(),
     player: player.mark,
     name: player.name,
-    label: moveLabel(move, point, gameId),
+    label: moveLabel(move, point, gameId, previousGame),
     at: Date.now()
   };
 }
@@ -878,25 +884,48 @@ function createAppliedMove(
   };
 }
 
-function moveLabel(move: GameMove, point: { row: number; column: number }, gameId: GameId): string {
+function moveLabel(move: GameMove, point: { row: number; column: number }, gameId: GameId, previousGame?: GameState): string {
   if (gameId === "four-in-a-row") return `Column ${point.column + 1}`;
   if (gameId === "dots-and-boxes") {
     return `${move.edge === "h" ? "H" : "V"}${point.row + 1}-${point.column + 1}`;
   }
-  if (gameId === "checkers" || gameId === "nine-mens-morris") {
+  if (gameId === "checkers") {
     const from = "row" in move && Number.isInteger(move.row)
       ? `${columnName(move.column)}${(move.row ?? 0) + 1}`
       : "";
     const to = `${columnName(point.column)}${point.row + 1}`;
     return from ? `${from}-${to}` : to;
   }
+  if (gameId === "nine-mens-morris") {
+    const to = `${columnName(point.column)}${point.row + 1}`;
+    if (previousGame?.meta?.morris?.pendingRemoval) return `Remove ${to}`;
+    if (Number.isInteger(move.toRow) && Number.isInteger(move.toColumn)) {
+      const from = `${columnName(move.column)}${(move.row ?? 0) + 1}`;
+      return `${from}-${to}`;
+    }
+    return `Point ${to}`;
+  }
   if (gameId === "last-card") return point.column < 0 ? "Draw" : `Card ${point.column + 1}`;
+  if (gameId === "battleship") return `Fire ${columnName(point.column)}${point.row + 1}`;
+  if (gameId === "mancala") return `Pit ${point.column + 1}`;
+  if (gameId === "darts") return dartsMoveLabel(point);
   if (gameId === "word-hunt") return move.word ? String(move.word).toUpperCase() : "Time";
+  if (gameId === "cup-pong") return point.column < 0 ? "Re-rack" : `Cup ${point.column + 1}`;
   if (gameId === "dominoes") {
-    if (point.column < 0) return "Pass";
-    return `Tile ${point.column + 1} ${move.edge === "h" ? "left" : "right"}`;
+    if (point.column < 0) return move.edge === "h" ? "Draw" : "Pass";
+    return `Tile ${point.column + 1} ${point.row === 0 ? "left" : "right"}`;
   }
   return `${columnName(point.column)}${point.row + 1}`;
+}
+
+function dartsMoveLabel(point: { row: number; column: number }): string {
+  if (point.column < 0 || point.row === 0) return "Miss";
+  if (point.column === DARTS_BULL_INDEX) return "Bull";
+  if (point.column === DARTS_DOUBLE_BULL_INDEX) return "Double Bull";
+  const segment = DARTS_SEGMENTS[point.column];
+  if (!segment) return "Miss";
+  const prefix = point.row === 3 ? "T" : point.row === 2 ? "D" : "S";
+  return `${prefix}${segment}`;
 }
 
 function columnName(column: number): string {

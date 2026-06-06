@@ -4,9 +4,12 @@ import {
   chooseBotMove,
   createGameState,
   finalizeGameState,
+  GAME_IDS,
   getBoardVariantOptions,
   getGameDefinition,
+  getLegalMoves,
   isSoloGame,
+  maskGameMetaForPlayer,
   type Cell,
   type GameMove,
   type GameState
@@ -21,6 +24,43 @@ function play(
   expect(result.ok).toBe(true);
   return result.state;
 }
+
+describe("Game catalog integrity", () => {
+  it("creates rectangular state for every visible game variant", () => {
+    for (const gameId of GAME_IDS) {
+      for (const option of getBoardVariantOptions(gameId)) {
+        const state = createGameState(gameId, option.id);
+        expect(state.gameId).toBe(gameId);
+        expect(state.boardVariant).toBe(option.id);
+        expect(state.board.length).toBeGreaterThan(0);
+        expect(state.board[0].length).toBeGreaterThan(0);
+        expect(state.board.every((row) => row.length === state.board[0].length)).toBe(true);
+      }
+    }
+  });
+
+  it("can apply the first legal move for every non-solo game", () => {
+    for (const gameId of GAME_IDS.filter((candidate) => !isSoloGame(candidate))) {
+      const state = createGameState(gameId);
+      const legalMoves = getLegalMoves(state);
+      expect(legalMoves.length, `${gameId} should expose at least one opening move`).toBeGreaterThan(0);
+
+      const result = applyGameMove(state, state.turn, legalMoves[0]);
+      expect(result.ok, `${gameId} should accept its first legal move`).toBe(true);
+    }
+  });
+
+  it("chooses a valid bot move for every bot-supported table game", () => {
+    for (const gameId of GAME_IDS.filter((candidate) => !isSoloGame(candidate))) {
+      const state = createGameState(gameId);
+      const move = chooseBotMove(state, state.turn, "sharp");
+      expect(move, `${gameId} should choose a bot move`).not.toBeNull();
+
+      const result = applyGameMove(state, state.turn, move!);
+      expect(result.ok, `${gameId} bot move should be legal`).toBe(true);
+    }
+  });
+});
 
 describe("Four in a Row", () => {
   it("uses a 7 by 6 vertical board and drops pieces to the lowest empty slot", () => {
@@ -265,6 +305,41 @@ describe("New game engines", () => {
     expect(state.board[3][3]).toBe("p1");
   });
 
+  it("passes a Reversi turn when the opponent has no legal move", () => {
+    const state = createGameState("reversi");
+    state.board = [
+      [null, "p2", "p2", null, null, null, "p2", "p2"],
+      [null, null, null, "p2", null, null, "p2", null],
+      [null, null, null, "p2", null, "p2", "p2", "p1"],
+      ["p1", "p2", null, null, null, null, "p1", "p1"],
+      [null, null, "p2", null, "p1", null, "p2", "p1"],
+      ["p2", "p2", null, null, "p1", null, "p2", null],
+      ["p1", "p2", null, "p1", null, null, "p2", null],
+      [null, null, null, null, null, null, null, null]
+    ];
+    state.turn = "p1";
+
+    const next = play(state, "p1", { row: 4, column: 0 });
+
+    expect(next.board[5][0]).toBe("p1");
+    expect(next.turn).toBe("p1");
+    expect(next.winner).toBeNull();
+    expect(getLegalMoves(next).length).toBeGreaterThan(0);
+  });
+
+  it("ends Reversi when neither side has a legal move", () => {
+    const state = createGameState("reversi");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill("p1"));
+    state.board[0][0] = null;
+    state.board[0][1] = "p2";
+    state.turn = "p1";
+
+    const next = play(state, "p1", { row: 0, column: 0 });
+
+    expect(next.winner).toBe("p1");
+    expect(next.board.flat().filter((cell) => cell === "p2")).toHaveLength(0);
+  });
+
   it("moves and promotes Checkers pieces", () => {
     let state = createGameState("checkers");
     state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
@@ -345,6 +420,27 @@ describe("New game engines", () => {
     expect(cells).toHaveLength(17);
     expect(keys.size).toBe(17);
     expect(cells.every((cell) => cell.row >= 0 && cell.row < 10 && cell.column >= 0 && cell.column < 10)).toBe(true);
+  });
+
+  it("masks live enemy Sea Battle ships while revealing sunk ships", () => {
+    const state = createGameState("battleship");
+    const meta = state.meta?.battleship;
+    const firstShip = meta?.botFleet[0];
+    expect(meta).toBeTruthy();
+    expect(firstShip).toBeTruthy();
+
+    expect(maskGameMetaForPlayer(state.meta, "p1")?.battleship?.botFleet).toHaveLength(0);
+
+    for (const cell of firstShip!.cells) {
+      meta!.humanShots[`${cell.row},${cell.column}`] = "hit";
+    }
+
+    const masked = maskGameMetaForPlayer(state.meta, "p1")?.battleship;
+    expect(masked?.botFleet).toHaveLength(1);
+    expect(masked?.botFleet[0].id).toBe(firstShip!.id);
+    expect(masked?.botShips).toHaveLength(firstShip!.size);
+    expect(masked?.playerFleet).toHaveLength(5);
+    expect(masked?.playerShips).toHaveLength(17);
   });
 
   it("registers Pipe Dash as a solo arcade game", () => {
@@ -474,6 +570,37 @@ describe("New game engines", () => {
     expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p2", count: 4 });
   });
 
+  it("blocks Color Clash wild draw-four when the player can follow the table color", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [
+        { id: "blue-1-a", color: "blue", rank: "1" },
+        { id: "yellow-4-a", color: "yellow", rank: "4" },
+        { id: "red-3-a", color: "red", rank: "3" },
+        { id: "blue-8-a", color: "blue", rank: "8" }
+      ],
+      deckCount: 4,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [
+          { id: "wild-four-a", color: "wild", rank: "wild4" },
+          { id: "red-2-a", color: "red", rank: "2" }
+        ],
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }],
+        p3: [],
+        p4: []
+      },
+      handCounts: { p1: 2, p2: 1, p3: 0, p4: 0 },
+      currentColor: "red"
+    };
+
+    expect(getLegalMoves(state)).toEqual([{ column: 1 }]);
+    expect(applyGameMove(state, "p1", { column: 0 })).toMatchObject({
+      ok: false,
+      reason: "Match the discard color or rank."
+    });
+  });
+
   it("chooses a sharp Color Clash action card before a plain match", () => {
     const state = createGameState("last-card");
     state.turn = "p2";
@@ -500,11 +627,116 @@ describe("New game engines", () => {
     expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ column: 0 });
   });
 
+  it("only lets a stuck Color Clash player draw", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [{ id: "yellow-4-a", color: "yellow", rank: "4" }],
+      deckCount: 1,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [{ id: "red-7-a", color: "red", rank: "7" }],
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }],
+        p3: [],
+        p4: []
+      },
+      handCounts: { p1: 1, p2: 1, p3: 0, p4: 0 },
+      currentColor: "red"
+    };
+
+    expect(getLegalMoves(state)).toEqual([{ column: 0 }]);
+    expect(applyGameMove(state, "p1", { column: -1 })).toMatchObject({
+      ok: false,
+      reason: "Play a matching card before drawing."
+    });
+  });
+
+  it("keeps a Color Clash turn when the drawn card can be played", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [{ id: "red-7-a", color: "red", rank: "7" }],
+      deckCount: 1,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [{ id: "green-2-a", color: "green", rank: "2" }],
+        p2: [{ id: "blue-9-a", color: "blue", rank: "9" }],
+        p3: [],
+        p4: []
+      },
+      handCounts: { p1: 1, p2: 1, p3: 0, p4: 0 },
+      currentColor: "red"
+    };
+
+    const next = play(state, "p1", { column: -1 });
+
+    expect(next.turn).toBe("p1");
+    expect(next.meta?.lastCard?.hands.p1.at(-1)).toMatchObject({ color: "red", rank: "7" });
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: true });
+  });
+
+  it("passes a Color Clash turn when the drawn card is still unplayable", () => {
+    const state = createGameState("last-card");
+    state.meta!.lastCard = {
+      deck: [{ id: "blue-7-a", color: "blue", rank: "7" }],
+      deckCount: 1,
+      discard: [{ id: "red-5-table", color: "red", rank: "5" }],
+      hands: {
+        p1: [{ id: "green-2-a", color: "green", rank: "2" }],
+        p2: [{ id: "yellow-9-a", color: "yellow", rank: "9" }],
+        p3: [],
+        p4: []
+      },
+      handCounts: { p1: 1, p2: 1, p3: 0, p4: 0 },
+      currentColor: "red"
+    };
+
+    const next = play(state, "p1", { column: -1 });
+
+    expect(next.turn).toBe("p2");
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: false });
+  });
+
   it("sows stones and updates stores in Mancala", () => {
     const state = play(createGameState("mancala"), "p1", { column: 2 });
 
     expect(state.meta?.mancala?.pits.p1[2]).toBe(0);
     expect(state.meta?.mancala?.stores.p1).toBe(1);
+  });
+
+  it("gives Mancala an extra turn when the last stone lands in the store", () => {
+    const state = createGameState("mancala");
+    state.meta!.mancala!.pits.p1 = [1, 0, 0, 0, 0, 1];
+    state.meta!.mancala!.pits.p2 = [4, 4, 4, 4, 4, 4];
+
+    const next = play(state, "p1", { column: 5 });
+
+    expect(next.meta?.mancala?.stores.p1).toBe(1);
+    expect(next.turn).toBe("p1");
+    expect(next.winner).toBeNull();
+  });
+
+  it("captures opposite Mancala stones from an empty own pit", () => {
+    const state = createGameState("mancala");
+    state.meta!.mancala!.pits.p1 = [1, 0, 1, 0, 0, 0];
+    state.meta!.mancala!.pits.p2 = [1, 0, 4, 0, 0, 0];
+
+    const next = play(state, "p1", { column: 2 });
+
+    expect(next.meta?.mancala?.stores.p1).toBe(5);
+    expect(next.meta?.mancala?.pits.p1[3]).toBe(0);
+    expect(next.meta?.mancala?.pits.p2[2]).toBe(0);
+  });
+
+  it("sweeps remaining Mancala stones and decides the winner when a side empties", () => {
+    const state = createGameState("mancala");
+    state.meta!.mancala!.pits.p1 = [0, 0, 0, 0, 0, 1];
+    state.meta!.mancala!.pits.p2 = [1, 1, 1, 1, 1, 1];
+
+    const next = play(state, "p1", { column: 5 });
+
+    expect(next.meta?.mancala?.pits.p1).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(next.meta?.mancala?.pits.p2).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(next.meta?.mancala?.stores).toMatchObject({ p1: 1, p2: 6 });
+    expect(next.winner).toBe("p2");
   });
 
   it("detects a connected Hex path", () => {
@@ -534,7 +766,7 @@ describe("New game engines", () => {
     expect(state.winner).toBe("p1");
   });
 
-  it("places Nine Men's Morris pieces and removes an opponent after a mill", () => {
+  it("places Nine Men's Morris pieces and waits for the mill maker to choose a capture", () => {
     let state = createGameState("nine-mens-morris");
     state = play(state, "p1", { row: 0, column: 0 });
     state = play(state, "p2", { row: 1, column: 1 });
@@ -543,7 +775,46 @@ describe("New game engines", () => {
     state = play(state, "p1", { row: 0, column: 6 });
 
     expect(state.meta?.morris?.placed.p1).toBe(3);
+    expect(state.meta?.morris?.pendingRemoval).toBe("p1");
+    expect(state.turn).toBe("p1");
+    expect(state.board.flat().filter((cell) => cell === "p2")).toHaveLength(2);
+
+    state = play(state, "p1", { row: 1, column: 1 });
+
     expect(state.board.flat().filter((cell) => cell === "p2")).toHaveLength(1);
+    expect(state.board[1][1]).toBeNull();
+    expect(state.meta?.morris?.removed.p2).toBe(1);
+    expect(state.meta?.morris?.pendingRemoval).toBeNull();
+    expect(state.turn).toBe("p2");
+  });
+
+  it("protects Nine Men's Morris pieces inside mills while exposed pieces can be removed", () => {
+    const state = createGameState("nine-mens-morris");
+    state.board = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));
+    state.board[0][0] = "p1";
+    state.board[0][3] = "p1";
+    state.board[0][6] = "p1";
+    state.board[1][1] = "p2";
+    state.board[1][3] = "p2";
+    state.board[1][5] = "p2";
+    state.board[3][0] = "p2";
+    state.turn = "p1";
+    state.meta!.morris = {
+      placed: { p1: 9, p2: 9, p3: 0, p4: 0 },
+      removed: { p1: 0, p2: 0, p3: 0, p4: 0 },
+      pendingRemoval: "p1"
+    };
+
+    expect(applyGameMove(state, "p1", { row: 1, column: 1 })).toMatchObject({
+      ok: false,
+      reason: "Choose an exposed opponent piece."
+    });
+
+    const result = applyGameMove(state, "p1", { row: 3, column: 0 });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.board[3][0]).toBeNull();
+    expect(result.state.turn).toBe("p2");
   });
 });
 
@@ -557,6 +828,31 @@ describe("New table games", () => {
     expect(state.meta?.darts?.scores.p1).toBe(121);
     expect(state.meta?.darts?.dartsLeft).toBe(3);
     expect(state.turn).toBe("p2");
+  });
+
+  it("treats Darts misses as thrown darts without changing score", () => {
+    const state = play(createGameState("darts"), "p1", { row: 0, column: -1 });
+
+    expect(state.meta?.darts?.scores.p1).toBe(301);
+    expect(state.meta?.darts?.dartsLeft).toBe(2);
+    expect(state.meta?.darts?.throws.at(-1)).toMatchObject({ label: "Miss", score: 0 });
+    expect(state.turn).toBe("p1");
+  });
+
+  it("requires Darts checkout to land on a double and resets the visit on bust", () => {
+    let state = createGameState("darts");
+    state.meta!.darts!.scores.p1 = 60;
+    state = play(state, "p1", { row: 3, column: 0 });
+
+    expect(state.winner).toBeNull();
+    expect(state.meta?.darts?.scores.p1).toBe(60);
+    expect(state.turn).toBe("p2");
+
+    state = { ...state, turn: "p1", winner: null, meta: { ...state.meta, darts: { ...state.meta!.darts!, scores: { ...state.meta!.darts!.scores, p1: 40 } } } };
+    state = play(state, "p1", { row: 2, column: 0 });
+
+    expect(state.winner).toBe("p1");
+    expect(state.meta?.darts?.scores.p1).toBe(0);
   });
 
   it("generates a unique Word Hunt board and rejects duplicate words", () => {
@@ -686,6 +982,29 @@ describe("Bot move selection", () => {
       { row: 4, column: 3 },
       { row: 4, column: 5 }
     ]).toContainEqual(move);
+  });
+
+  it("extends a Sea Battle hit line instead of guessing beside the middle", () => {
+    const state = createGameState("battleship");
+    state.turn = "p2";
+    state.meta!.battleship!.botShots = { "4,4": "hit", "4,5": "hit" };
+
+    expect([
+      { row: 4, column: 3 },
+      { row: 4, column: 6 }
+    ]).toContainEqual(chooseBotMove(state, "p2", "ruthless"));
+  });
+
+  it("extends the open end of a Sea Battle hit line when the other end missed", () => {
+    const state = createGameState("battleship");
+    state.turn = "p2";
+    state.meta!.battleship!.botShots = {
+      "4,3": "miss",
+      "4,4": "hit",
+      "4,5": "hit"
+    };
+
+    expect(chooseBotMove(state, "p2", "ruthless")).toEqual({ row: 4, column: 6 });
   });
 
   it("opens ruthless Four in a Row from an attacking flank instead of the center", () => {
