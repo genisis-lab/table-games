@@ -50,6 +50,20 @@ describe("Game catalog integrity", () => {
     }
   });
 
+  it("can apply an opening legal move for every visible non-solo game variant", () => {
+    for (const gameId of GAME_IDS.filter((candidate) => !isSoloGame(candidate))) {
+      for (const option of getBoardVariantOptions(gameId)) {
+        const state = createGameState(gameId, option.id);
+        const legalMoves = getLegalMoves(state);
+        const label = `${gameId} ${option.id}`;
+        expect(legalMoves.length, `${label} should expose at least one opening move`).toBeGreaterThan(0);
+
+        const result = applyGameMove(state, state.turn, legalMoves[0]);
+        expect(result.ok, `${label} should accept its first legal move`).toBe(true);
+      }
+    }
+  });
+
   it("chooses a valid bot move for every bot-supported table game", () => {
     for (const gameId of GAME_IDS.filter((candidate) => !isSoloGame(candidate))) {
       const state = createGameState(gameId);
@@ -58,6 +72,20 @@ describe("Game catalog integrity", () => {
 
       const result = applyGameMove(state, state.turn, move!);
       expect(result.ok, `${gameId} bot move should be legal`).toBe(true);
+    }
+  });
+
+  it("chooses a valid bot move for every visible non-solo game variant", () => {
+    for (const gameId of GAME_IDS.filter((candidate) => !isSoloGame(candidate))) {
+      for (const option of getBoardVariantOptions(gameId)) {
+        const state = createGameState(gameId, option.id);
+        const label = `${gameId} ${option.id}`;
+        const move = chooseBotMove(state, state.turn, "sharp");
+        expect(move, `${label} should choose a bot move`).not.toBeNull();
+
+        const result = applyGameMove(state, state.turn, move!);
+        expect(result.ok, `${label} bot move should be legal`).toBe(true);
+      }
     }
   });
 });
