@@ -29,6 +29,14 @@ type ServerMessage = {
         teamScores?: { northSouth: number; eastWest: number };
         playerOrder: string[];
       };
+      battleship?: {
+        botFleet: unknown[];
+        playerFleet: unknown[];
+        botShips: unknown[];
+        playerShips: unknown[];
+        humanShots: Record<string, "hit" | "miss">;
+        botShots: Record<string, "hit" | "miss">;
+      };
     };
     chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
@@ -211,6 +219,35 @@ describe("GameRoom Durable Object", () => {
     expect(meta?.discard).toHaveLength(1);
   });
 
+  it("masks hidden Sea Battle fleets in public and player snapshots", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "battleship",
+        opponent: "bot"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const publicSnapshot = (await (await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}`)).json()) as ServerMessage["room"];
+    expect(publicSnapshot?.meta?.battleship?.botFleet).toHaveLength(0);
+    expect(publicSnapshot?.meta?.battleship?.playerFleet).toHaveLength(0);
+    expect(publicSnapshot?.meta?.battleship?.botShips).toHaveLength(0);
+    expect(publicSnapshot?.meta?.battleship?.playerShips).toHaveLength(0);
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+    const meta = snapshot.room?.meta?.battleship;
+
+    expect(snapshot.room?.gameId).toBe("battleship");
+    expect(meta?.botFleet).toHaveLength(0);
+    expect(meta?.botShips).toHaveLength(0);
+    expect(meta?.playerFleet).toHaveLength(5);
+    expect(meta?.playerShips).toHaveLength(17);
+  });
+
   it("creates Pipe Dash as a solo room without seating a bot opponent", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
@@ -318,6 +355,55 @@ describe("GameRoom Durable Object", () => {
     expect(undone.room?.board[0][0]).toBe(null);
   });
 
+  it("labels custom game move history with player-facing actions", async () => {
+    const dartsRoom = await createAndJoinRoom("darts", "token-darts", "Darla");
+    dartsRoom.socket.send(JSON.stringify({ type: "make_move", move: { row: 2, column: 0 } }));
+    const dartsMove = await waitForType(dartsRoom.socket, "move_applied");
+    expect(dartsMove.room?.moveHistory.at(-1)?.label).toBe("D20");
+
+    const cupRoom = await createAndJoinRoom("cup-pong", "token-cup", "Cora");
+    cupRoom.socket.send(JSON.stringify({ type: "make_move", move: { column: 0, power: 0.5, aim: 0 } }));
+    const cupMove = await waitForType(cupRoom.socket, "move_applied");
+    expect(cupMove.room?.moveHistory.at(-1)?.label).toBe("Cup 1");
+
+    const morrisRoom = await createAndJoinRoom("nine-mens-morris", "token-morris", "Mira");
+    morrisRoom.socket.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    const morrisMove = await waitForType(morrisRoom.socket, "move_applied");
+    expect(morrisMove.room?.moveHistory.at(-1)?.label).toBe("Point A1");
+  });
+
+  it("labels Nine Men's Morris mill captures as removals", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "nine-mens-morris", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const white = await openRoomSocket(roomId);
+    const black = await openRoomSocket(roomId);
+    white.send(JSON.stringify({ type: "join", guestToken: "token-white", name: "Willa" }));
+    await waitForType(white, "room_snapshot");
+    black.send(JSON.stringify({ type: "join", guestToken: "token-black", name: "Basil" }));
+    await waitForType(black, "room_snapshot");
+
+    white.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
+    await waitForType(white, "move_applied");
+    black.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 1 } }));
+    await waitForType(white, "move_applied");
+    white.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 3 } }));
+    await waitForType(white, "move_applied");
+    black.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 3 } }));
+    await waitForType(white, "move_applied");
+    white.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 6 } }));
+    const mill = await waitForType(white, "move_applied");
+    expect(mill.room?.turn).toBe("p1");
+
+    white.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 1 } }));
+    const removed = await waitForType(white, "move_applied");
+    expect(removed.room?.moveHistory.at(-1)?.label).toBe("Remove B2");
+    expect(removed.room?.turn).toBe("p2");
+  });
+
   it("votes for rematches in friend rooms before resetting", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
@@ -420,6 +506,23 @@ describe("GameRoom Durable Object", () => {
     expect(reaction.reaction?.emoji).toBe("🏆");
   });
 });
+
+async function createAndJoinRoom(
+  gameId: string,
+  guestToken: string,
+  name: string
+): Promise<{ roomId: string; socket: WebSocket }> {
+  const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+    method: "POST",
+    body: JSON.stringify({ gameId, opponent: "friend" }),
+    headers: { "content-type": "application/json" }
+  });
+  const { roomId } = (await created.json()) as { roomId: string };
+  const socket = await openRoomSocket(roomId);
+  socket.send(JSON.stringify({ type: "join", guestToken, name }));
+  await waitForType(socket, "room_snapshot");
+  return { roomId, socket };
+}
 
 async function openRoomSocket(roomId: string): Promise<WebSocket> {
   const response = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}/socket`, {

@@ -1504,6 +1504,16 @@ button:disabled {
   outline-offset: -5px;
 }
 
+.morris-board .removable {
+  outline: 4px solid var(--red);
+  outline-offset: -5px;
+  box-shadow: inset 0 0 0 4px rgb(255 255 255 / 52%);
+}
+
+.morris-board.removing .point:not(.removable) {
+  opacity: 0.55;
+}
+
 .battleship-board button {
   position: relative;
   z-index: 1;
@@ -3210,6 +3220,7 @@ button:disabled {
 
 .dartboard {
   position: relative;
+  isolation: isolate;
   width: min(100%, 560px, calc(100vh - 300px));
   aspect-ratio: 1;
   place-self: center;
@@ -3222,6 +3233,27 @@ button:disabled {
     0 0 0 7px #e8d1a5,
     0 0 0 12px #171d22,
     9px 12px 0 rgb(24 34 41 / 70%);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.dartboard.can-throw:hover {
+  box-shadow:
+    0 0 0 7px #e8d1a5,
+    0 0 0 12px #171d22,
+    9px 12px 0 rgb(24 34 41 / 70%),
+    0 0 34px rgb(255 218 90 / 42%);
+}
+
+.dartboard.waiting {
+  cursor: default;
+  filter: saturate(0.78);
+}
+
+.dartboard:focus-visible {
+  outline: 4px solid var(--yellow);
+  outline-offset: 16px;
 }
 
 .dartboard::before,
@@ -3255,68 +3287,119 @@ button:disabled {
   transform: translate(-50%, -50%);
 }
 
-.dart-slice {
+.dart-aim-reticle {
   position: absolute;
-  inset: 0;
-  transform: rotate(calc(var(--slice) * 18deg));
-  pointer-events: none;
-}
-
-.dart-slice button {
-  position: absolute;
-  left: 50%;
-  width: clamp(24px, 4.6vw, 38px);
-  height: clamp(22px, 4vw, 34px);
-  border: 0;
+  z-index: 5;
+  width: clamp(38px, 8vw, 54px);
+  height: clamp(38px, 8vw, 54px);
+  border: 3px solid #fffdf7;
   border-radius: 50%;
-  background: rgb(255 255 255 / 0%);
-  color: transparent;
-  font-size: 0;
-  font-weight: 950;
-  pointer-events: auto;
-  transform: translateX(-50%) rotate(calc(var(--slice) * -18deg));
+  box-shadow:
+    0 0 0 3px #171d22,
+    0 0 28px rgb(255 218 90 / 72%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: dart-target-pop 340ms ease;
 }
 
-.dart-slice button:nth-child(1) {
-  top: 22%;
-}
-
-.dart-slice button:nth-child(2) {
-  top: 40%;
-}
-
-.dart-slice button:nth-child(3) {
-  top: 71%;
-}
-
-.dart-slice button:not(:disabled):hover,
-.dart-slice button:not(:disabled):focus-visible {
-  background: rgb(255 255 255 / 46%);
-  outline: 3px solid var(--yellow);
-  outline-offset: 1px;
-}
-
-.dart-bull {
+.dart-aim-reticle::before,
+.dart-aim-reticle::after {
   position: absolute;
   left: 50%;
   top: 50%;
-  border: 2px solid var(--ink);
-  border-radius: 50%;
-  font-weight: 950;
+  width: 120%;
+  height: 3px;
+  border-radius: 999px;
+  background: #fffdf7;
+  content: "";
   transform: translate(-50%, -50%);
 }
 
-.dart-bull.outer {
-  width: 76px;
-  height: 76px;
-  background: #1aa35e;
+.dart-aim-reticle::after {
+  transform: translate(-50%, -50%) rotate(90deg);
 }
 
-.dart-bull.inner {
-  width: 44px;
-  height: 44px;
-  background: #df3c31;
-  color: #fffdf7;
+.dart-aim-reticle span {
+  position: absolute;
+  left: 50%;
+  top: -42px;
+  padding: 5px 9px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper-strong);
+  color: var(--ink);
+  font-size: clamp(0.68rem, 1.8vw, 0.85rem);
+  font-weight: 950;
+  white-space: nowrap;
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: translateX(-50%);
+}
+
+.dart-aim-reticle.miss {
+  border-color: #9aa0a6;
+  box-shadow:
+    0 0 0 3px #171d22,
+    0 0 20px rgb(255 255 255 / 38%);
+}
+
+.dart-aim-reticle.triple,
+.dart-aim-reticle.double,
+.dart-aim-reticle.double-bull {
+  border-color: var(--yellow);
+}
+
+.dart-hand-dart {
+  position: absolute;
+  z-index: 6;
+  width: clamp(54px, 12vw, 76px);
+  height: 8px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, #f6f0df 0 14%, #e13b2e 14% 24%, #202a31 24% 82%, #ffe06a 82%);
+  box-shadow: 0 3px 0 rgb(0 0 0 / 45%);
+  transform: translate(-72%, -50%) rotate(-24deg);
+  transition: left 90ms ease, top 90ms ease, transform 140ms ease;
+  pointer-events: none;
+}
+
+.dart-hand-dart::before {
+  position: absolute;
+  left: -11px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 13px solid #f6f0df;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.dart-hand-dart::after {
+  position: absolute;
+  right: -15px;
+  top: 50%;
+  width: 18px;
+  height: 22px;
+  background: linear-gradient(135deg, #2c7df0 0 50%, #f23a32 50%);
+  clip-path: polygon(0 50%, 100% 0, 78% 50%, 100% 100%);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.dartboard.aiming .dart-hand-dart {
+  transform: translate(-72%, -50%) rotate(-16deg) scale(1.02);
+}
+
+@keyframes dart-target-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .dart-throw-line {
@@ -3394,11 +3477,15 @@ button:disabled {
   background:
     linear-gradient(180deg, #164ca5, #0d3472);
   box-shadow: inset 0 5px 0 rgb(255 255 255 / 14%), 6px 8px 0 rgb(11 30 66 / 50%);
+  touch-action: none;
+  user-select: none;
 }
 
-.word-grid span {
+.word-grid button {
   display: grid;
   place-items: center;
+  min-width: 0;
+  min-height: 0;
   border: 0;
   border-radius: 9px;
   background:
@@ -3411,6 +3498,41 @@ button:disabled {
     inset 0 4px 0 rgb(255 255 255 / 34%),
     inset 0 -6px 0 rgb(0 0 0 / 16%),
     3px 4px 0 rgb(11 30 66 / 55%);
+  cursor: pointer;
+  touch-action: none;
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.word-grid button:hover:not(:disabled),
+.word-grid button:focus-visible {
+  filter: brightness(1.08) saturate(1.08);
+  outline: 3px solid #fff7a8;
+  outline-offset: 2px;
+}
+
+.word-grid button.selected {
+  color: #0d3472;
+  background:
+    linear-gradient(180deg, #fff9c7, #ffd84e);
+  text-shadow: 0 2px 0 rgb(255 255 255 / 52%);
+  transform: translateY(-4px) scale(1.03);
+  box-shadow:
+    inset 0 4px 0 rgb(255 255 255 / 42%),
+    inset 0 -6px 0 rgb(152 99 0 / 20%),
+    0 0 0 4px rgb(255 255 255 / 30%),
+    4px 7px 0 rgb(11 30 66 / 58%);
+}
+
+.word-grid button.path-last {
+  background:
+    linear-gradient(180deg, #fff, #73f1bb);
+  transform: translateY(-6px) scale(1.08) rotate(-1deg);
+}
+
+.word-grid button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.35) brightness(0.8);
+  opacity: 0.72;
 }
 
 .word-entry {
@@ -4436,10 +4558,8 @@ button:disabled {
     width: min(100%, calc(100vw - 84px));
   }
 
-  .dart-slice button {
-    width: 36px;
-    height: 24px;
-    font-size: 0.62rem;
+  .dart-aim-reticle span {
+    top: -36px;
   }
 
   .word-hunt-table {

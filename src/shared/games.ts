@@ -139,6 +139,7 @@ export interface MancalaMeta {
 export interface MorrisMeta {
   placed: Record<PlayerMark, number>;
   removed: Record<PlayerMark, number>;
+  pendingRemoval?: PlayerMark | null;
 }
 
 export type LastCardColor = "red" | "yellow" | "green" | "blue" | "wild";
@@ -173,7 +174,7 @@ export interface LastCardMeta {
   hands: Record<PlayerMark, LastCardCard[]>;
   handCounts: Record<PlayerMark, number>;
   currentColor: LastCardActiveColor;
-  lastDraw?: { player: PlayerMark; count: number };
+  lastDraw?: { player: PlayerMark; count: number; playable?: boolean };
   lastAction?: LastCardRank;
 }
 
@@ -518,6 +519,7 @@ const LAST_CARD_DRAW_MOVE = -1;
 const LAST_CARD_HAND_SIZE = 7;
 const DARTS_SEGMENTS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5] as const;
 const DARTS_BULL_INDEX = 20;
+const DARTS_MISS_COLUMN = -1;
 const WORD_HUNT_BANK = [
   "SPARK", "TABLE", "BOARD", "TOKEN", "MATCH", "STONE", "CROWN", "ARROW", "QUEST", "LUCK",
   "RACK", "CUP", "DART", "BIRD", "GRID", "LINE", "SWAP", "FIRE", "CHAT", "SCORE",
@@ -874,7 +876,7 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   }
 
   if (gameId === "nine-mens-morris") {
-    return { morris: { placed: emptyPlayerNumbers(), removed: emptyPlayerNumbers() } };
+    return { morris: { placed: emptyPlayerNumbers(), removed: emptyPlayerNumbers(), pendingRemoval: null } };
   }
 
   if (gameId === "last-card") return { lastCard: createLastCardMeta() };
@@ -1181,6 +1183,32 @@ function applyHexMove(state: GameState, player: PlayerMark, move: GameMove): Mov
 function applyMorrisMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
   const meta = cloneMeta(state).morris!;
   const board = cloneBoard(state.board);
+
+  if (meta.pendingRemoval) {
+    if (meta.pendingRemoval !== player) {
+      return { ok: false, state, reason: "Wait for the mill capture." };
+    }
+    const opponent = otherPlayer(player);
+    const point = { row: move.row ?? -1, column: move.column };
+    if (!isMorrisPoint(point) || cellAt(board, point) !== opponent) {
+      return { ok: false, state, reason: "Choose an opponent piece to remove." };
+    }
+    const removable = removableMorrisPieces(board, opponent);
+    if (!removable.some((candidate) => candidate.row === point.row && candidate.column === point.column)) {
+      return { ok: false, state, reason: "Choose an exposed opponent piece." };
+    }
+
+    board[point.row][point.column] = null;
+    meta.removed[opponent] += 1;
+    meta.pendingRemoval = null;
+    const opponentPieces = countPieces(board, opponent);
+    const winner = meta.placed[opponent] >= 9 && opponentPieces < 3 ? player : null;
+    return okMove(state, board, player, point, {
+      winner,
+      meta: { ...cloneMeta(state), morris: meta }
+    });
+  }
+
   const placing = meta.placed[player] < 9;
   let point: BoardPoint;
 
@@ -1206,13 +1234,16 @@ function applyMorrisMove(state: GameState, player: PlayerMark, move: GameMove): 
     board[point.row][point.column] = player;
   }
 
-  if (formsMill(board, point, player)) removeMorrisPiece(board, meta, otherPlayer(player));
+  if (formsMill(board, point, player) && removableMorrisPieces(board, otherPlayer(player)).length > 0) {
+    meta.pendingRemoval = player;
+  }
 
   const opponent = otherPlayer(player);
   const opponentPieces = countPieces(board, opponent);
   const winner = meta.placed[opponent] >= 9 && opponentPieces < 3 ? player : null;
   return okMove(state, board, player, point, {
     winner,
+    nextTurn: meta.pendingRemoval ? player : undefined,
     meta: { ...cloneMeta(state), morris: meta }
   });
 }
@@ -1224,10 +1255,16 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
   if (!meta || !top) return { ok: false, state, reason: "The deck is not ready." };
 
   if (move.column === LAST_CARD_DRAW_MOVE) {
+    if (getPlayableLastCardIndexes(meta, player).length > 0) {
+      return { ok: false, state, reason: "Play a matching card before drawing." };
+    }
+
     const drawn = drawLastCards(meta, player, 1);
     if (drawn === 0) return { ok: false, state, reason: "The draw pile is empty." };
 
-    meta.lastDraw = { player, count: drawn };
+    const drawnCard = meta.hands[player].at(-1);
+    const playable = drawnCard ? isLastCardPlayable(drawnCard, top, meta.currentColor, meta.hands[player]) : false;
+    meta.lastDraw = { player, count: drawn, playable };
     delete meta.lastAction;
     syncLastCardHandCounts(meta);
     return {
@@ -1235,7 +1272,7 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
       point: { row: 0, column: LAST_CARD_DRAW_MOVE },
       state: {
         ...state,
-        turn: otherPlayer(player),
+        turn: playable ? player : otherPlayer(player),
         winner: null,
         winningLine: [],
         moveCount: state.moveCount + 1,
@@ -1251,7 +1288,7 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
   const hand = meta.hands[player];
   const card = hand[move.column];
   if (!card) return { ok: false, state, reason: "That card is not in your hand." };
-  if (!isLastCardPlayable(card, top, meta.currentColor)) {
+  if (!isLastCardPlayable(card, top, meta.currentColor, hand)) {
     return { ok: false, state, reason: "Match the discard color or rank." };
   }
 
@@ -1299,6 +1336,7 @@ function applyDartsMove(state: GameState, player: PlayerMark, move: GameMove): M
   if (!target) return { ok: false, state, reason: "Choose a dart target." };
 
   const previousScore = meta.scores[player];
+  const turnStartScore = previousScore + meta.turnScore;
   const nextScore = previousScore - target.value;
   meta.throws = [...meta.throws, { player, label: target.label, score: target.value }].slice(-9);
   meta.dartsLeft -= 1;
@@ -1306,11 +1344,18 @@ function applyDartsMove(state: GameState, player: PlayerMark, move: GameMove): M
 
   let nextTurn = player;
   let winner: Winner = null;
-  if (nextScore === 0) {
+  const checkout = nextScore === 0 && target.multiplier === 2;
+  const bust = !checkout && nextScore < 2;
+  if (checkout) {
     meta.scores[player] = 0;
     winner = player;
-  } else if (nextScore < 0 || meta.dartsLeft <= 0) {
-    if (nextScore > 0) meta.scores[player] = nextScore;
+  } else if (bust) {
+    meta.scores[player] = turnStartScore;
+    meta.dartsLeft = 3;
+    meta.turnScore = 0;
+    nextTurn = otherPlayer(player);
+  } else if (meta.dartsLeft <= 0) {
+    meta.scores[player] = nextScore;
     meta.dartsLeft = 3;
     meta.turnScore = 0;
     nextTurn = otherPlayer(player);
@@ -1601,19 +1646,14 @@ function chooseBattleshipMove(
   if (!meta) return legalMoves[0];
   const shots = player === "p1" ? meta.humanShots : meta.botShots;
   const unshot = new Set(legalMoves.map((move) => keyOf({ row: move.row ?? 0, column: move.column })));
-  const hitPoints = Object.entries(shots)
-    .filter(([, shot]) => shot === "hit")
-    .map(([key]) => pointFromKey(key));
+  const hitPoints = activeBattleshipHits(meta, player, shots);
+  const lineTargets = battleshipLineTargets(hitPoints, unshot);
 
-  const targetMoves = hitPoints
-    .flatMap((point) => [
-      { row: point.row - 1, column: point.column },
-      { row: point.row + 1, column: point.column },
-      { row: point.row, column: point.column - 1 },
-      { row: point.row, column: point.column + 1 }
-    ])
-    .filter((point) => point.row >= 0 && point.row < 10 && point.column >= 0 && point.column < 10 && unshot.has(keyOf(point)))
-    .map((point) => ({ row: point.row, column: point.column }));
+  if (lineTargets.length > 0) {
+    return orderedBattleshipTargets(lineTargets, shots)[0] ?? legalMoves[0];
+  }
+
+  const targetMoves = battleshipAdjacentTargets(hitPoints, unshot);
 
   if (targetMoves.length > 0) {
     return orderedBattleshipTargets(targetMoves, shots)[0] ?? legalMoves[0];
@@ -1631,6 +1671,92 @@ function chooseBattleshipMove(
   return ordered[0] ?? legalMoves[0];
 }
 
+function activeBattleshipHits(
+  meta: BattleshipMeta,
+  player: PlayerMark,
+  shots: Record<string, "hit" | "miss">
+): BoardPoint[] {
+  const targetFleet = player === "p1" ? meta.botFleet : meta.playerFleet;
+  const sunkKeys = new Set(
+    targetFleet
+      .filter((ship) => ship.cells.every((cell) => shots[keyOf(cell)] === "hit"))
+      .flatMap((ship) => ship.cells.map((cell) => keyOf(cell)))
+  );
+  return Object.entries(shots)
+    .filter(([key, shot]) => shot === "hit" && !sunkKeys.has(key))
+    .map(([key]) => pointFromKey(key));
+}
+
+function battleshipLineTargets(hitPoints: BoardPoint[], unshot: Set<string>): GameMove[] {
+  const moves = new Map<string, GameMove>();
+  for (const cluster of battleshipHitClusters(hitPoints).filter((candidate) => candidate.length >= 2)) {
+    const rows = new Set(cluster.map((point) => point.row));
+    const columns = new Set(cluster.map((point) => point.column));
+    if (rows.size === 1) {
+      const row = cluster[0].row;
+      const orderedColumns = cluster.map((point) => point.column).sort((a, b) => a - b);
+      for (const column of [orderedColumns[0] - 1, orderedColumns.at(-1)! + 1]) {
+        const point = { row, column };
+        if (unshot.has(keyOf(point))) moves.set(keyOf(point), point);
+      }
+    } else if (columns.size === 1) {
+      const column = cluster[0].column;
+      const orderedRows = cluster.map((point) => point.row).sort((a, b) => a - b);
+      for (const row of [orderedRows[0] - 1, orderedRows.at(-1)! + 1]) {
+        const point = { row, column };
+        if (unshot.has(keyOf(point))) moves.set(keyOf(point), point);
+      }
+    }
+  }
+  return [...moves.values()];
+}
+
+function battleshipHitClusters(hitPoints: BoardPoint[]): BoardPoint[][] {
+  const pointByKey = new Map(hitPoints.map((point) => [keyOf(point), point]));
+  const seen = new Set<string>();
+  const clusters: BoardPoint[][] = [];
+  for (const point of hitPoints) {
+    const startKey = keyOf(point);
+    if (seen.has(startKey)) continue;
+    const cluster: BoardPoint[] = [];
+    const queue = [point];
+    seen.add(startKey);
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index];
+      cluster.push(current);
+      for (const neighbor of orthogonalNeighbors(current)) {
+        const neighborKey = keyOf(neighbor);
+        const next = pointByKey.get(neighborKey);
+        if (!next || seen.has(neighborKey)) continue;
+        seen.add(neighborKey);
+        queue.push(next);
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+function battleshipAdjacentTargets(hitPoints: BoardPoint[], unshot: Set<string>): GameMove[] {
+  const moves = new Map<string, GameMove>();
+  for (const point of hitPoints) {
+    for (const candidate of orthogonalNeighbors(point)) {
+      if (candidate.row < 0 || candidate.row >= 10 || candidate.column < 0 || candidate.column >= 10) continue;
+      if (unshot.has(keyOf(candidate))) moves.set(keyOf(candidate), candidate);
+    }
+  }
+  return [...moves.values()];
+}
+
+function orthogonalNeighbors(point: BoardPoint): BoardPoint[] {
+  return [
+    { row: point.row - 1, column: point.column },
+    { row: point.row + 1, column: point.column },
+    { row: point.row, column: point.column - 1 },
+    { row: point.row, column: point.column + 1 }
+  ];
+}
+
 function orderedBattleshipTargets(moves: GameMove[], shots: Record<string, "hit" | "miss">): GameMove[] {
   const center = 4.5;
   return [...moves].sort((a, b) => {
@@ -1646,12 +1772,7 @@ function orderedBattleshipTargets(moves: GameMove[], shots: Record<string, "hit"
 }
 
 function battleshipNeighborHits(point: BoardPoint, shots: Record<string, "hit" | "miss">): number {
-  return [
-    { row: point.row - 1, column: point.column },
-    { row: point.row + 1, column: point.column },
-    { row: point.row, column: point.column - 1 },
-    { row: point.row, column: point.column + 1 }
-  ].filter((candidate) => shots[keyOf(candidate)] === "hit").length;
+  return orthogonalNeighbors(point).filter((candidate) => shots[keyOf(candidate)] === "hit").length;
 }
 
 function adjacentDotsBoxes(meta: DotsMeta, edge: "h" | "v", row: number, column: number): BoardPoint[] {
@@ -1739,6 +1860,10 @@ function getMancalaMoves(state: GameState, player: PlayerMark): GameMove[] {
 function getMorrisMoves(state: GameState, player: PlayerMark): GameMove[] {
   const meta = state.meta?.morris;
   if (!meta) return [];
+  if (meta.pendingRemoval) {
+    if (meta.pendingRemoval !== player) return [];
+    return removableMorrisPieces(state.board, otherPlayer(player)).map((point) => ({ row: point.row, column: point.column }));
+  }
   if (meta.placed[player] < 9) {
     return [...MORRIS_POINTS].map(pointFromKey).filter((point) => !cellAt(state.board, point));
   }
@@ -1765,7 +1890,8 @@ function getLastCardMoves(state: GameState, player: PlayerMark): GameMove[] {
   if (!meta || !top) return [];
 
   const playable = getPlayableLastCardIndexes(meta, player).map((column) => ({ column }));
-  return canDrawLastCard(meta) ? [...playable, { column: LAST_CARD_DRAW_MOVE }] : playable;
+  if (playable.length > 0) return playable;
+  return canDrawLastCard(meta) ? [{ column: LAST_CARD_DRAW_MOVE }] : [];
 }
 
 function getDartsMoves(_state: GameState): GameMove[] {
@@ -1774,7 +1900,12 @@ function getDartsMoves(_state: GameState): GameMove[] {
     { row: 2, column: index },
     { row: 3, column: index }
   ]);
-  return [...segmentMoves, { row: 25, column: DARTS_BULL_INDEX }, { row: 50, column: DARTS_BULL_INDEX + 1 }];
+  return [
+    ...segmentMoves,
+    { row: 25, column: DARTS_BULL_INDEX },
+    { row: 50, column: DARTS_BULL_INDEX + 1 },
+    { row: 0, column: DARTS_MISS_COLUMN }
+  ];
 }
 
 function getWordHuntMoves(state: GameState, player: PlayerMark): GameMove[] {
@@ -1837,9 +1968,10 @@ function chooseDartsMove(
       const target = dartsTargetFromMove(move);
       if (!target) return { move, rank: Number.NEGATIVE_INFINITY };
       const remaining = score - target.value;
-      const exact = remaining === 0 ? 100_000 : 0;
-      const bustPenalty = remaining < 0 ? -50_000 : 0;
-      const pressure = Math.max(0, 80 - Math.abs(remaining)) * 4;
+      const checkout = remaining === 0 && target.multiplier === 2;
+      const exact = checkout ? 100_000 : 0;
+      const bustPenalty = !checkout && remaining < 2 ? -50_000 : 0;
+      const pressure = remaining >= 2 ? Math.max(0, 80 - Math.abs(remaining)) * 4 : 0;
       const power = difficulty === "casual" ? target.value * Math.random() : target.value;
       return { move, rank: exact + bustPenalty + pressure + power };
     })
@@ -2441,16 +2573,12 @@ function formsMill(board: Cell[][], point: BoardPoint, player: PlayerMark): bool
   return MORRIS_MILLS.some((mill) => mill.includes(key) && mill.every((millKey) => cellAt(board, pointFromKey(millKey)) === player));
 }
 
-function removeMorrisPiece(board: Cell[][], meta: MorrisMeta, opponent: PlayerMark): void {
+function removableMorrisPieces(board: Cell[][], opponent: PlayerMark): BoardPoint[] {
   const removable = [...MORRIS_POINTS]
     .map(pointFromKey)
     .filter((point) => cellAt(board, point) === opponent && !formsMill(board, point, opponent));
   const fallback = [...MORRIS_POINTS].map(pointFromKey).filter((point) => cellAt(board, point) === opponent);
-  const target = removable[0] ?? fallback[0];
-  if (target) {
-    board[target.row][target.column] = null;
-    meta.removed[opponent] += 1;
-  }
+  return removable.length > 0 ? removable : fallback;
 }
 
 function makeFleetShips(): BattleshipShip[] {
@@ -2610,7 +2738,15 @@ function lastCardTop(meta: LastCardMeta): LastCardCard | undefined {
   return meta.discard.at(-1);
 }
 
-function isLastCardPlayable(card: LastCardCard, top: LastCardCard, currentColor: LastCardActiveColor): boolean {
+function isLastCardPlayable(
+  card: LastCardCard,
+  top: LastCardCard,
+  currentColor: LastCardActiveColor,
+  hand: LastCardCard[] = []
+): boolean {
+  if (card.rank === "wild4" && hand.some((candidate) => candidate !== card && candidate.color === currentColor)) {
+    return false;
+  }
   return card.color === "wild" || card.color === currentColor || card.rank === top.rank;
 }
 
@@ -2619,7 +2755,7 @@ function getPlayableLastCardIndexes(meta: LastCardMeta, player: PlayerMark): num
   if (!top) return [];
   return meta.hands[player]
     .map((card, index) => ({ card, index }))
-    .filter(({ card }) => isLastCardPlayable(card, top, meta.currentColor))
+    .filter(({ card }) => isLastCardPlayable(card, top, meta.currentColor, meta.hands[player]))
     .map(({ index }) => index);
 }
 
@@ -2724,6 +2860,7 @@ function emptyPlayerStringLists(): Record<PlayerMark, string[]> {
 }
 
 function dartsTargetFromMove(move: GameMove): DartsTarget | null {
+  if (move.column === DARTS_MISS_COLUMN || move.row === 0) return { label: "Miss", value: 0, multiplier: 0 };
   if (move.column === DARTS_BULL_INDEX) return { label: "Bull", value: 25, multiplier: 1 };
   if (move.column === DARTS_BULL_INDEX + 1) return { label: "Double Bull", value: 50, multiplier: 2 };
   const segment = DARTS_SEGMENTS[move.column];
@@ -2851,9 +2988,31 @@ function addUniquePlayer(values: PlayerMark[], value: PlayerMark): void {
 }
 
 export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
-  if (!meta?.lastCard && !meta?.dominoes) return meta;
+  if (!meta?.lastCard && !meta?.dominoes && !meta?.battleship) return meta;
 
   const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
+  if (meta.battleship && next.battleship) {
+    const battleship = next.battleship;
+    const sunkBotFleet = meta.battleship.botFleet.filter((ship) => isBattleshipSunkBy(ship, meta.battleship!.humanShots));
+    const sunkPlayerFleet = meta.battleship.playerFleet.filter((ship) => isBattleshipSunkBy(ship, meta.battleship!.botShots));
+
+    if (player === "p1") {
+      battleship.botFleet = sunkBotFleet;
+      battleship.botShips = flattenFleet(sunkBotFleet);
+      battleship.playerFleet = meta.battleship.playerFleet;
+      battleship.playerShips = meta.battleship.playerShips;
+    } else if (player === "p2") {
+      battleship.botFleet = meta.battleship.botFleet;
+      battleship.botShips = meta.battleship.botShips;
+      battleship.playerFleet = sunkPlayerFleet;
+      battleship.playerShips = flattenFleet(sunkPlayerFleet);
+    } else {
+      battleship.botFleet = sunkBotFleet;
+      battleship.botShips = flattenFleet(sunkBotFleet);
+      battleship.playerFleet = sunkPlayerFleet;
+      battleship.playerShips = flattenFleet(sunkPlayerFleet);
+    }
+  }
   if (meta.lastCard && next.lastCard) {
     const lastCard = next.lastCard;
     const counts = {
@@ -2876,6 +3035,10 @@ export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: Playe
     next.dominoes = maskDominoMetaForPlayer(normalizeDominoMeta(meta.dominoes), player as DominoPlayerMark | undefined);
   }
   return next;
+}
+
+function isBattleshipSunkBy(ship: BattleshipShip, shots: Record<string, "hit" | "miss">): boolean {
+  return ship.cells.every((cell) => shots[keyOf(cell)] === "hit");
 }
 
 function isMorrisPoint(point: BoardPoint): boolean {
