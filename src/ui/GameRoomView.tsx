@@ -60,6 +60,15 @@ export interface DartThrowResolution {
   yPct: number;
 }
 
+interface DartFlight {
+  id: number;
+  label: string;
+  score: number;
+  zone: DartThrowResolution["zone"];
+  xPct: number;
+  yPct: number;
+}
+
 export function resolveDartThrow(x: number, y: number, width: number, height: number): DartThrowResolution {
   if (!Number.isFinite(x) || !Number.isFinite(y) || width <= 0 || height <= 0) {
     return dartResolution({ row: 0, column: DARTBOARD_MISS_COLUMN }, "Miss", 0, "miss", 50, 50);
@@ -1161,7 +1170,10 @@ function DartsBoard({
   const boardRef = useRef<HTMLDivElement | null>(null);
   const throwActiveRef = useRef(false);
   const previewTimeoutRef = useRef<number | null>(null);
+  const flightTimeoutRef = useRef<number | null>(null);
+  const flightIdRef = useRef(0);
   const [throwPreview, setThrowPreview] = useState<DartThrowResolution | null>(null);
+  const [throwFlight, setThrowFlight] = useState<DartFlight | null>(null);
   const meta = room.meta?.darts;
 
   useEffect(() => {
@@ -1172,6 +1184,7 @@ function DartsBoard({
   useEffect(() => {
     return () => {
       if (previewTimeoutRef.current !== null) window.clearTimeout(previewTimeoutRef.current);
+      if (flightTimeoutRef.current !== null) window.clearTimeout(flightTimeoutRef.current);
     };
   }, []);
 
@@ -1180,6 +1193,23 @@ function DartsBoard({
   const resolvePointerThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     return resolveDartThrow(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+  };
+
+  const showDartFlight = (resolved: DartThrowResolution) => {
+    setThrowPreview(resolved);
+    setThrowFlight({
+      id: flightIdRef.current + 1,
+      label: resolved.label,
+      score: resolved.score,
+      zone: resolved.zone,
+      xPct: resolved.xPct,
+      yPct: resolved.yPct
+    });
+    flightIdRef.current += 1;
+    if (previewTimeoutRef.current !== null) window.clearTimeout(previewTimeoutRef.current);
+    if (flightTimeoutRef.current !== null) window.clearTimeout(flightTimeoutRef.current);
+    previewTimeoutRef.current = window.setTimeout(() => setThrowPreview(null), 520);
+    flightTimeoutRef.current = window.setTimeout(() => setThrowFlight(null), 560);
   };
 
   const beginThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1191,8 +1221,13 @@ function DartsBoard({
   };
 
   const aimThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!throwActiveRef.current || !canMove) return;
+    const pressed = event.buttons > 0;
+    if (!canMove || (!throwActiveRef.current && !pressed)) return;
     event.preventDefault();
+    if (!throwActiveRef.current) {
+      throwActiveRef.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
     setThrowPreview(resolvePointerThrow(event));
   };
 
@@ -1202,10 +1237,8 @@ function DartsBoard({
     throwActiveRef.current = false;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     const resolved = resolvePointerThrow(event);
-    setThrowPreview(resolved);
+    showDartFlight(resolved);
     onMove(resolved.move);
-    if (previewTimeoutRef.current !== null) window.clearTimeout(previewTimeoutRef.current);
-    previewTimeoutRef.current = window.setTimeout(() => setThrowPreview(null), 420);
   };
 
   const cancelThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1221,7 +1254,9 @@ function DartsBoard({
       onMove({ row: 3, column: 0 });
       return;
     }
-    onMove(resolveDartThrow(rect.width / 2, rect.height * 0.225, rect.width, rect.height).move);
+    const resolved = resolveDartThrow(rect.width / 2, rect.height * 0.225, rect.width, rect.height);
+    showDartFlight(resolved);
+    onMove(resolved.move);
   };
 
   return (
@@ -1240,7 +1275,7 @@ function DartsBoard({
         </div>
       </div>
       <div
-        className={`dartboard ${canMove ? "can-throw" : "waiting"} ${throwPreview ? "aiming" : ""}`}
+        className={`dartboard ${canMove ? "can-throw" : "waiting"} ${throwPreview ? "aiming" : ""} ${throwFlight ? "throwing" : ""}`}
         ref={boardRef}
         role="button"
         tabIndex={canMove ? 0 : -1}
@@ -1276,12 +1311,24 @@ function DartsBoard({
             <span>{throwPreview.score > 0 ? `${throwPreview.label} ${throwPreview.score}` : throwPreview.label}</span>
           </span>
         ) : null}
+        {throwFlight ? (
+          <span
+            className={`dart-impact ${throwFlight.zone}`}
+            key={throwFlight.id}
+            style={{ left: `${throwFlight.xPct}%`, top: `${throwFlight.yPct}%` }}
+            aria-hidden="true"
+          >
+            {throwFlight.score > 0 ? `${throwFlight.label} ${throwFlight.score}` : throwFlight.label}
+          </span>
+        ) : null}
         <span
-          className="dart-hand-dart"
+          className={`dart-hand-dart ${throwFlight ? "in-flight" : ""}`}
           style={{
-            left: throwPreview ? `${throwPreview.xPct}%` : "50%",
-            top: throwPreview ? `${throwPreview.yPct}%` : "112%"
-          }}
+            left: throwFlight ? "50%" : throwPreview ? `${throwPreview.xPct}%` : "50%",
+            top: throwFlight ? "112%" : throwPreview ? `${throwPreview.yPct}%` : "112%",
+            "--dart-target-x": `${throwFlight?.xPct ?? throwPreview?.xPct ?? 50}%`,
+            "--dart-target-y": `${throwFlight?.yPct ?? throwPreview?.yPct ?? 112}%`
+          } as CSSProperties}
           aria-hidden="true"
         />
         <span className="dart-throw-line" aria-hidden="true" />

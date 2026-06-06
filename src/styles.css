@@ -3246,6 +3246,14 @@ button:disabled {
     0 0 34px rgb(255 218 90 / 42%);
 }
 
+.dartboard.aiming {
+  cursor: grabbing;
+}
+
+.dartboard.throwing {
+  cursor: grabbing;
+}
+
 .dartboard.waiting {
   cursor: default;
   filter: saturate(0.78);
@@ -3348,6 +3356,33 @@ button:disabled {
   border-color: var(--yellow);
 }
 
+.dart-impact {
+  position: absolute;
+  z-index: 7;
+  min-width: 52px;
+  padding: 5px 9px;
+  border: 2px solid #171d22;
+  border-radius: 999px;
+  background: #fffdf7;
+  color: #171d22;
+  font-size: clamp(0.7rem, 2vw, 0.9rem);
+  font-weight: 950;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow:
+    2px 2px 0 #171d22,
+    0 0 24px rgb(255 218 90 / 70%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: dart-impact-pop 560ms cubic-bezier(0.2, 1.45, 0.3, 1) both;
+}
+
+.dart-impact.miss {
+  background: #e8edf0;
+  color: #53606a;
+  box-shadow: 2px 2px 0 #171d22;
+}
+
 .dart-hand-dart {
   position: absolute;
   z-index: 6;
@@ -3360,6 +3395,14 @@ button:disabled {
   transform: translate(-72%, -50%) rotate(-24deg);
   transition: left 90ms ease, top 90ms ease, transform 140ms ease;
   pointer-events: none;
+}
+
+.dart-hand-dart.in-flight {
+  left: 50%;
+  top: 112%;
+  z-index: 8;
+  transition: none;
+  animation: dart-flight 460ms cubic-bezier(0.12, 0.88, 0.18, 1) both;
 }
 
 .dart-hand-dart::before {
@@ -3391,6 +3434,10 @@ button:disabled {
   transform: translate(-72%, -50%) rotate(-16deg) scale(1.02);
 }
 
+.dartboard.throwing .dart-hand-dart {
+  transform-origin: 82% 50%;
+}
+
 @keyframes dart-target-pop {
   from {
     opacity: 0;
@@ -3399,6 +3446,42 @@ button:disabled {
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dart-flight {
+  0% {
+    left: 50%;
+    top: 112%;
+    filter: drop-shadow(0 18px 8px rgb(0 0 0 / 28%));
+    opacity: 0.88;
+    transform: translate(-72%, -50%) rotate(-36deg) scale(1.18);
+  }
+  48% {
+    filter: drop-shadow(0 10px 6px rgb(0 0 0 / 22%));
+    transform: translate(-72%, -50%) rotate(-21deg) scale(1.04);
+  }
+  100% {
+    left: var(--dart-target-x);
+    top: var(--dart-target-y);
+    filter: drop-shadow(0 4px 3px rgb(0 0 0 / 18%));
+    opacity: 1;
+    transform: translate(-72%, -50%) rotate(-12deg) scale(0.84);
+  }
+}
+
+@keyframes dart-impact-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.46) rotate(-7deg);
+  }
+  42% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.12) rotate(2deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9) rotate(0);
   }
 }
 

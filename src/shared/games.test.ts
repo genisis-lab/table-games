@@ -210,6 +210,25 @@ describe("New game engines", () => {
     expect(state.meta?.ultimate?.localWinners[8]).toBe("p2");
   });
 
+  it("enforces Ultimate Tic Tac Toe sent-board targeting", () => {
+    let state = createGameState("ultimate-tic-tac-toe");
+    state = play(state, "p1", { row: 8, column: 8 });
+
+    expect(applyGameMove(state, "p2", { row: 0, column: 0 })).toMatchObject({
+      ok: false,
+      reason: "Play inside the highlighted small board."
+    });
+  });
+
+  it("lets Ultimate Tic Tac Toe players choose any board when sent to a claimed board", () => {
+    let state = createGameState("ultimate-tic-tac-toe");
+    state.meta!.ultimate!.localWinners[0] = "p2";
+
+    state = play(state, "p1", { row: 6, column: 6 });
+
+    expect(state.meta?.ultimate?.activeBoard).toBeNull();
+  });
+
   it("can create a larger Ultimate Tic Tac Toe variant", () => {
     const state = createGameState("ultimate-tic-tac-toe", "wide");
 
@@ -386,6 +405,36 @@ describe("New game engines", () => {
     expect(state.board[2][3]).toBeNull();
     expect(state.turn).toBe("p2");
     expect(state.meta?.checkers?.mustContinueFrom).toBeNull();
+  });
+
+  it("lets Checkers kings capture backward", () => {
+    let state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[2][3] = "p1";
+    state.board[3][4] = "p2";
+    state.meta!.checkers!.kings = ["2,3"];
+
+    state = play(state, "p1", { row: 2, column: 3, toRow: 4, toColumn: 5 });
+
+    expect(state.board[4][5]).toBe("p1");
+    expect(state.board[3][4]).toBeNull();
+    expect(state.meta?.checkers?.kings).toContain("4,5");
+  });
+
+  it("forces Checkers multi-jumps to continue from the same checker", () => {
+    let state = createGameState("checkers");
+    state.board = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    state.board[5][0] = "p1";
+    state.board[4][1] = "p2";
+    state.board[2][3] = "p2";
+    state.board[5][6] = "p1";
+
+    state = play(state, "p1", { row: 5, column: 0, toRow: 3, toColumn: 2 });
+
+    expect(applyGameMove(state, "p1", { row: 5, column: 6, toRow: 4, toColumn: 7 })).toMatchObject({
+      ok: false,
+      reason: "Continue the jump with the same checker."
+    });
   });
 
   it("records hits in Sea Battle", () => {
@@ -766,6 +815,18 @@ describe("New game engines", () => {
     expect(state.winner).toBe("p1");
   });
 
+  it("detects the second player's connected Hex path", () => {
+    let state = createGameState("hex");
+
+    for (let row = 0; row < 11; row += 1) {
+      state = play(state, "p1", { row, column: 10 });
+      state = play(state, "p2", { row, column: 0 });
+    }
+
+    expect(state.winner).toBe("p2");
+    expect(state.winningLine.map((point) => point.row)).toEqual(Array.from({ length: 11 }, (_, row) => row));
+  });
+
   it("places Nine Men's Morris pieces and waits for the mill maker to choose a capture", () => {
     let state = createGameState("nine-mens-morris");
     state = play(state, "p1", { row: 0, column: 0 });
@@ -815,6 +876,80 @@ describe("New game engines", () => {
     expect(result.ok).toBe(true);
     expect(result.state.board[3][0]).toBeNull();
     expect(result.state.turn).toBe("p2");
+  });
+
+  it("requires Nine Men's Morris sliding pieces to move along connected points", () => {
+    const state = createGameState("nine-mens-morris");
+    state.board = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));
+    state.board[0][0] = "p1";
+    state.board[0][6] = "p1";
+    state.board[1][1] = "p1";
+    state.board[3][0] = "p1";
+    state.board[6][0] = "p2";
+    state.board[6][3] = "p2";
+    state.board[5][5] = "p2";
+    state.turn = "p1";
+    state.meta!.morris = {
+      placed: { p1: 9, p2: 9, p3: 0, p4: 0 },
+      removed: { p1: 0, p2: 0, p3: 0, p4: 0 },
+      pendingRemoval: null
+    };
+
+    expect(applyGameMove(state, "p1", { row: 0, column: 0, toRow: 6, toColumn: 6 })).toMatchObject({
+      ok: false,
+      reason: "Slide to a connected point."
+    });
+
+    const result = applyGameMove(state, "p1", { row: 0, column: 0, toRow: 0, toColumn: 3 });
+    expect(result.ok).toBe(true);
+    expect(result.state.board[0][3]).toBe("p1");
+  });
+
+  it("lets Nine Men's Morris pieces fly once a player is down to three pieces", () => {
+    const state = createGameState("nine-mens-morris");
+    state.board = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));
+    state.board[0][0] = "p1";
+    state.board[0][3] = "p1";
+    state.board[1][1] = "p1";
+    state.board[6][0] = "p2";
+    state.board[6][3] = "p2";
+    state.board[5][5] = "p2";
+    state.turn = "p1";
+    state.meta!.morris = {
+      placed: { p1: 9, p2: 9, p3: 0, p4: 0 },
+      removed: { p1: 6, p2: 6, p3: 0, p4: 0 },
+      pendingRemoval: null
+    };
+
+    const result = applyGameMove(state, "p1", { row: 0, column: 0, toRow: 6, toColumn: 6 });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.board[6][6]).toBe("p1");
+  });
+
+  it("wins Nine Men's Morris when a fully placed opponent has no legal slide", () => {
+    const state = createGameState("nine-mens-morris");
+    state.board = Array.from({ length: 7 }, () => Array.from<Cell>({ length: 7 }).fill(null));
+    state.board[0][0] = "p2";
+    state.board[0][6] = "p2";
+    state.board[6][0] = "p2";
+    state.board[6][6] = "p2";
+    state.board[0][3] = "p1";
+    state.board[3][0] = "p1";
+    state.board[3][6] = "p1";
+    state.board[6][3] = "p1";
+    state.board[1][1] = "p1";
+    state.turn = "p1";
+    state.meta!.morris = {
+      placed: { p1: 9, p2: 9, p3: 0, p4: 0 },
+      removed: { p1: 0, p2: 0, p3: 0, p4: 0 },
+      pendingRemoval: null
+    };
+
+    const result = applyGameMove(state, "p1", { row: 1, column: 1, toRow: 1, toColumn: 3 });
+
+    expect(result.ok).toBe(true);
+    expect(result.state.winner).toBe("p1");
   });
 });
 

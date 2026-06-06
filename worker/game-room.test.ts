@@ -37,6 +37,11 @@ type ServerMessage = {
         humanShots: Record<string, "hit" | "miss">;
         botShots: Record<string, "hit" | "miss">;
       };
+      wordHunt?: {
+        words: string[];
+        found: { p1: string[]; p2: string[]; p3: string[]; p4: string[] };
+        scores: { p1: number; p2: number; p3: number; p4: number };
+      };
     };
     chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
@@ -140,6 +145,35 @@ describe("GameRoom Durable Object", () => {
     expect(performance.now() - botWaitStarted).toBeGreaterThanOrEqual(300);
     expect(botMove.move?.player).toBe("p2");
     expect(botMove.room?.board.flat().filter(Boolean)).toHaveLength(2);
+  });
+
+  it("runs Word Hunt bot rooms as a timed word race after the human finds a word", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "word-hunt",
+        opponent: "bot",
+        botDifficulty: "ruthless"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+    const humanWord = snapshot.room?.meta?.wordHunt?.words[0];
+    expect(humanWord).toBeTruthy();
+
+    player.send(JSON.stringify({ type: "make_move", move: { column: 0, word: humanWord } }));
+    const humanMove = await waitForType(player, "move_applied");
+    expect(humanMove.move?.player).toBe("p1");
+    expect(humanMove.room?.meta?.wordHunt?.found.p1).toContain(humanWord);
+
+    const botMove = await waitForType(player, "move_applied");
+    expect(botMove.move?.player).toBe("p2");
+    expect(botMove.room?.meta?.wordHunt?.found.p2.length).toBeGreaterThan(0);
+    expect(botMove.room?.meta?.wordHunt?.scores.p2).toBeGreaterThan(0);
   });
 
   it("fills Dominoes bot rooms with four seats", async () => {
