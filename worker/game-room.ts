@@ -70,12 +70,18 @@ const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
 const BOT_NAME = "Spark Bot";
 const BOT_MOVE_DELAY_MS = 520;
+const WORD_HUNT_BOT_DELAY_MS: Record<BotDifficulty, number> = {
+  casual: 1800,
+  sharp: 1200,
+  ruthless: 750
+};
 const DARTS_SEGMENTS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5] as const;
 const DARTS_BULL_INDEX = 20;
 const DARTS_DOUBLE_BULL_INDEX = 21;
 
 export class GameRoom extends DurableObject<Env> {
   private room: StoredRoom | null = null;
+  private activeWordHuntBotRooms = new Set<string>();
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -619,9 +625,12 @@ export class GameRoom extends DurableObject<Env> {
     await this.finalizeRoomIfNeeded(room);
     if (room.opponent !== "bot" || room.game.winner) return;
 
-    const bot = room.gameId === "word-hunt"
-      ? room.players.find((player) => player.isBot)
-      : room.players.find((player) => player.isBot && player.mark === room.game.turn);
+    if (room.gameId === "word-hunt") {
+      await this.playWordHuntBotLoop(room);
+      return;
+    }
+
+    const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
     if (!bot) return;
 
     const delayMs = room.gameId === "four-in-a-row" && room.botDifficulty === "ruthless" ? 80 : BOT_MOVE_DELAY_MS;
@@ -651,8 +660,59 @@ export class GameRoom extends DurableObject<Env> {
 
     if (room.game.winner) {
       this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
-    } else if (room.gameId !== "word-hunt" && room.players.some((player) => player.isBot && player.mark === room.game.turn)) {
+    } else if (room.players.some((player) => player.isBot && player.mark === room.game.turn)) {
       await this.maybePlayBot(room);
+    }
+  }
+
+  private async playWordHuntBotLoop(initialRoom: StoredRoom): Promise<void> {
+    if (this.activeWordHuntBotRooms.has(initialRoom.roomId)) return;
+    this.activeWordHuntBotRooms.add(initialRoom.roomId);
+
+    try {
+      let room = initialRoom;
+      while (true) {
+        await this.finalizeRoomIfNeeded(room);
+        if (room.opponent !== "bot" || room.gameId !== "word-hunt" || room.game.winner) return;
+        const bot = room.players.find((player) => player.isBot);
+        if (!bot) return;
+
+        await sleep(WORD_HUNT_BOT_DELAY_MS[room.botDifficulty]);
+        room = await this.loadRoom(room.roomId);
+        await this.finalizeRoomIfNeeded(room);
+        if (room.opponent !== "bot" || room.gameId !== "word-hunt" || room.game.winner) return;
+
+        const freshBot = room.players.find((player) => player.isBot);
+        if (!freshBot) return;
+        const move = chooseBotMove(room.game, freshBot.mark, room.botDifficulty);
+        if (!move) return;
+
+        const previousGame = room.game;
+        const result = applyGameMove(previousGame, freshBot.mark, move);
+        if (!result.ok) return;
+
+        room.gameHistory = [...room.gameHistory, cloneGameState(room.game)].slice(-30);
+        room.game = result.state;
+        room.moveHistory = [...room.moveHistory, createMoveRecord(freshBot, move, result.point, room.gameId, previousGame)].slice(-40);
+        room.undoRequests = [];
+        room.rematchRequests = [];
+        room.updatedAt = Date.now();
+        await this.saveRoom(room);
+
+        const appliedMove = createAppliedMove(freshBot.mark, move, result.point);
+        this.broadcastRoom(room, (snapshot) => ({
+          type: "move_applied",
+          room: snapshot,
+          move: appliedMove
+        }));
+
+        if (room.game.winner) {
+          this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
+          return;
+        }
+      }
+    } finally {
+      this.activeWordHuntBotRooms.delete(initialRoom.roomId);
     }
   }
 
