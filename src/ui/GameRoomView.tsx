@@ -1191,7 +1191,8 @@ function DartsBoard({
   if (!meta) return null;
 
   const resolvePointerThrow = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return resolveDartThrow(Number.NaN, Number.NaN, 0, 0);
     return resolveDartThrow(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
   };
 
@@ -1331,7 +1332,25 @@ function DartsBoard({
           } as CSSProperties}
           aria-hidden="true"
         />
+      </div>
+      <div
+        className={`dart-throw-zone ${canMove ? "can-throw" : "waiting"} ${throwPreview ? "aiming" : ""}`}
+        role="button"
+        tabIndex={canMove ? 0 : -1}
+        aria-label={canMove ? "Throw from line" : "Waiting for turn"}
+        aria-disabled={!canMove}
+        onPointerDown={beginThrow}
+        onPointerMove={aimThrow}
+        onPointerUp={finishThrow}
+        onPointerCancel={cancelThrow}
+        onKeyDown={(event) => {
+          if (event.key !== " " && event.key !== "Enter") return;
+          event.preventDefault();
+          throwFromKeyboard();
+        }}
+      >
         <span className="dart-throw-line" aria-hidden="true" />
+        <span className="dart-throw-grip" aria-hidden="true" />
       </div>
       <div className="dart-throws">
         {throwPreview ? (
