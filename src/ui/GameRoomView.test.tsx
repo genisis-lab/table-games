@@ -174,6 +174,73 @@ describe("GameRoomView", () => {
     expect(screen.getByText(/2 tiles · 8 pips/i)).toBeInTheDocument();
   });
 
+  it("plays an opening Domino tile directly from the hand", () => {
+    const onMove = vi.fn();
+    const dominoRoom: RoomSnapshot = {
+      ...room,
+      gameId: "dominoes",
+      board: [[null]],
+      players: [
+        { guestToken: "red-token", name: "Ruby", mark: "p1", connected: true, joinedAt: 1 },
+        { guestToken: "bot-2", name: "Bot 2", mark: "p2", connected: true, joinedAt: 2, isBot: true },
+        { guestToken: "bot-3", name: "Bot 3", mark: "p3", connected: true, joinedAt: 3, isBot: true },
+        { guestToken: "bot-4", name: "Bot 4", mark: "p4", connected: true, joinedAt: 4, isBot: true }
+      ],
+      meta: {
+        dominoes: {
+          deck: [],
+          hands: {
+            p1: [{ id: "2-4", left: 2, right: 4 }, { id: "1-1", left: 1, right: 1 }],
+            p2: [],
+            p3: [],
+            p4: []
+          },
+          handCounts: { p1: 2, p2: 7, p3: 7, p4: 7 },
+          chain: [],
+          openLeft: null,
+          openRight: null,
+          scores: { p1: 0, p2: 0, p3: 0, p4: 0 },
+          pipCounts: { p1: 8, p2: 0, p3: 0, p4: 0 },
+          teamScores: { northSouth: 0, eastWest: 0 },
+          passed: [],
+          passedNumbers: { p1: [], p2: [], p3: [], p4: [] },
+          playerOrder: ["p1", "p2", "p3", "p4"],
+          round: 1,
+          targetScore: 100,
+          gameMode: "partnership",
+          drawMode: "block",
+          log: ["Round 1 starts. Seat 1 leads."],
+          lastAction: "Round 1 starts. Seat 1 leads."
+        }
+      }
+    };
+
+    render(
+      <GameRoomView
+        room={dominoRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Pick any tile to lead the round.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select 2-4" }));
+
+    expect(onMove).toHaveBeenCalledWith({ column: 0, edge: "v" });
+  });
+
   it("keeps spectator reactions locked until the game is over", () => {
     const onReaction = vi.fn();
     const spectatorRoom: RoomSnapshot = {
@@ -1265,6 +1332,74 @@ describe("GameRoomView", () => {
     expect(onMove).toHaveBeenCalledWith({ row: 2, column: 0 });
     expect(dartboard).toHaveClass("throwing");
     expect(dartboard.querySelector(".dart-hand-dart.in-flight")).not.toBeNull();
+  });
+
+  it("keeps Darts throws working when pointer capture is unavailable", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "darts",
+          board: [[null]],
+          meta: {
+            darts: {
+              targetScore: 301,
+              scores: { p1: 301, p2: 301, p3: 301, p4: 301 },
+              dartsLeft: 3,
+              turnScore: 0,
+              throws: []
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const dartboard = screen.getByRole("button", { name: "Throw dart" });
+    const throwLine = screen.getByRole("button", { name: "Throw from line" });
+    Object.defineProperty(dartboard, "getBoundingClientRect", {
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 400,
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 400,
+        toJSON: () => ({})
+      })
+    });
+    Object.defineProperty(throwLine, "setPointerCapture", {
+      value: () => {
+        throw new DOMException("No active pointer", "NotFoundError");
+      }
+    });
+    Object.defineProperty(throwLine, "releasePointerCapture", {
+      value: () => {
+        throw new DOMException("No active pointer", "NotFoundError");
+      }
+    });
+
+    fireEvent.pointerDown(throwLine, { pointerId: 1, clientX: 200, clientY: 440 });
+    fireEvent.pointerMove(throwLine, { pointerId: 1, buttons: 1, clientX: 200, clientY: 40 });
+    fireEvent.pointerUp(throwLine, { pointerId: 1, clientX: 200, clientY: 40 });
+
+    expect(onMove).toHaveBeenCalledWith({ row: 2, column: 0 });
   });
 
   it("lets Darts throws recover when the pointer down is missed", () => {
