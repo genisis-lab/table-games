@@ -3946,6 +3946,28 @@ button:disabled {
   font-weight: 900;
 }
 
+.cup-rerack-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  max-width: min(300px, 82vw);
+  padding: 6px 15px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--yellow);
+  color: var(--ink);
+  box-shadow: 3px 4px 0 rgb(24 34 41 / 42%);
+  cursor: pointer;
+}
+
+.cup-rerack-button:hover,
+.cup-rerack-button:focus-visible {
+  transform: translateY(-1px);
+  outline: none;
+  box-shadow: 4px 5px 0 rgb(24 34 41 / 42%);
+}
+
 .cup-throw-pad {
   position: relative;
   display: grid;
@@ -4803,6 +4825,12 @@ button:disabled {
 
   .cup-shot-status span {
     font-size: 0.64rem;
+  }
+
+  .cup-rerack-button {
+    min-height: 31px;
+    padding: 5px 12px;
+    font-size: 0.74rem;
   }
 
   .cup-throw-pad {

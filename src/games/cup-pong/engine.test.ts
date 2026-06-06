@@ -114,10 +114,17 @@ describe("Cup Pong engine", () => {
 		expect(result.ok).toBe(false);
 	});
 
+	it("rejects a re-rack when the rack is already packed", () => {
+		const meta = freshMeta();
+		meta.cups.p2 = [true, true, false, false, false, false]; // 2 live, but no useful reformation.
+		const result = applyCupPongIntent(meta, "p1", { column: CUP_PONG_RERACK_MOVE });
+		expect(result.ok).toBe(false);
+	});
+
 	it("lists only the standing opponent cups as legal targets", () => {
 		const meta = freshMeta();
-		meta.cups.p2 = [true, false, true, false, false, false];
-		expect(getCupPongLegalMoves(meta, "p1")).toEqual([{ column: 0 }, { column: 2 }]);
+		meta.cups.p2 = [true, false, true, true, true, true]; // 5 live, so no re-rack move.
+		expect(getCupPongLegalMoves(meta, "p1")).toEqual([{ column: 0 }, { column: 2 }, { column: 3 }, { column: 4 }, { column: 5 }]);
 	});
 
 	it("aims a ruthless bot at the center cup with tight power and aim", () => {

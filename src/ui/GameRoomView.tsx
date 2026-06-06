@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, Cell, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
-import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
+import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isCupPongReRackAvailable, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 import { ThreeGameScene } from "./ThreeGameScene";
 
@@ -1646,6 +1646,7 @@ function CupPongBoard({
   const padRef = useRef<HTMLDivElement | null>(null);
   const targetLive = Boolean(targetCups[selectedCup]);
   const canThrow = canMove && targetLive && !room.winner;
+  const canReRack = Boolean(currentMark && canMove && !room.winner && isCupPongReRackAvailable(meta, currentMark));
   const lastThrow = meta.lastThrow;
   const targetPlayerName = playerNameFor(room.gameId, targetMark);
   const shooterName = playerNameFor(room.gameId, room.turn);
@@ -1756,6 +1757,11 @@ function CupPongBoard({
           <strong>{room.winner ? "Rack cleared" : canMove ? `Target ${targetPlayerName}` : `${shooterName} lining up`}</strong>
           <span>{lastThrow ? `${lastThrow.made ? "Sank" : "Missed"} cup ${lastThrow.target + 1}` : "Line up shot"}</span>
         </div>
+        {canReRack ? (
+          <button className="cup-rerack-button" type="button" onClick={() => onMove({ column: -1 })}>
+            Re-rack {targetPlayerName}
+          </button>
+        ) : null}
         <div
           className="cup-throw-pad"
           ref={padRef}

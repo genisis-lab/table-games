@@ -1086,6 +1086,56 @@ describe("New table games", () => {
     expect(next.turn).toBe("p2");
   });
 
+  it("offers and applies Cup Pong re-racks only for scattered threshold racks", () => {
+    const base = createGameState("cup-pong");
+    const state: GameState = {
+      ...base,
+      meta: {
+        ...base.meta,
+        cupPong: {
+          ...base.meta!.cupPong!,
+          cups: {
+            ...base.meta!.cupPong!.cups,
+            p2: [false, true, false, true, true, true]
+          }
+        }
+      }
+    };
+
+    expect(getLegalMoves(state).some((move) => move.column === -1)).toBe(true);
+
+    const result = applyGameMove(state, "p1", { column: -1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.point.column).toBe(-1);
+    expect(result.state.turn).toBe("p1");
+    expect(result.state.meta?.cupPong?.cups.p2).toEqual([true, true, true, true, false, false]);
+    expect(result.state.meta?.cupPong?.ballsRemaining).toBe(2);
+    expect(result.state.meta?.cupPong?.reRackAvailable).toBe(false);
+  });
+
+  it("does not offer Cup Pong re-racks for already packed racks", () => {
+    const base = createGameState("cup-pong");
+    const state: GameState = {
+      ...base,
+      meta: {
+        ...base.meta,
+        cupPong: {
+          ...base.meta!.cupPong!,
+          cups: {
+            ...base.meta!.cupPong!.cups,
+            p2: [true, true, true, true, false, false]
+          }
+        }
+      }
+    };
+
+    expect(getLegalMoves(state).some((move) => move.column === -1)).toBe(false);
+
+    const result = applyGameMove(state, "p1", { column: -1 });
+    expect(result.ok).toBe(false);
+  });
+
   it("deals four Dominoes hands and starts a matching chain", () => {
     const state = createGameState("dominoes");
     const firstTile = state.meta?.dominoes?.hands.p1[0];
