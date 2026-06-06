@@ -1,5 +1,7 @@
 import { SELF, reset } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import worker from "./index";
+import type { Env } from "./game-room";
 
 type ServerMessage = {
   type: string;
@@ -58,6 +60,20 @@ afterEach(async () => {
 });
 
 describe("GameRoom Durable Object", () => {
+  it("serves static assets for non-API room routes", async () => {
+    const response = await worker.fetch(
+      new Request("https://table-sparks.test/room/room-direct-link"),
+      {
+        ASSETS: {
+          fetch: async (request: Request) => new Response(`asset:${new URL(request.url).pathname}`)
+        }
+      } as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("asset:/room/room-direct-link");
+  });
+
   it("creates private invite rooms with the requested game", async () => {
     const response = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",

@@ -35,6 +35,9 @@ import type {
 
 export interface Env {
   ROOMS: DurableObjectNamespace<GameRoom>;
+  ASSETS?: {
+    fetch(request: Request): Promise<Response>;
+  };
 }
 
 interface StoredRoom {
