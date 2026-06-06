@@ -192,6 +192,29 @@ describe("GameRoom Durable Object", () => {
     expect(botMove.room?.meta?.wordHunt?.scores.p2).toBeGreaterThan(0);
   });
 
+  it("starts Word Hunt bots racing after a seated player joins", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        gameId: "word-hunt",
+        opponent: "bot",
+        botDifficulty: "ruthless"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+
+    const player = await openRoomSocket(roomId);
+    player.send(JSON.stringify({ type: "join", guestToken: "token-human", name: "Ruby" }));
+    const snapshot = await waitForType(player, "room_snapshot");
+    expect(snapshot.room?.meta?.wordHunt?.found.p2).toHaveLength(0);
+
+    const botMove = await waitForType(player, "move_applied");
+    expect(botMove.move?.player).toBe("p2");
+    expect(botMove.room?.meta?.wordHunt?.found.p2.length).toBe(1);
+    expect(botMove.room?.meta?.wordHunt?.scores.p2).toBeGreaterThan(0);
+  });
+
   it("fills Dominoes bot rooms with four seats", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",

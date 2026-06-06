@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BotDifficulty, BoardVariant, GameId, GameMove } from "./shared/games";
-import { isGameId } from "./shared/games";
+import { canBotStart, isBoardVariantForGame, isBotDifficulty, isGameId } from "./shared/games";
 import type { AppliedMove, ClientMessage, RoomSnapshot, ServerMessage } from "./shared/protocol";
 import { GameRoomView } from "./ui/GameRoomView";
 import { Lobby } from "./ui/Lobby";
@@ -26,6 +26,17 @@ export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
     return DEPLOYED_WORKER_ORIGIN;
   }
   return "";
+}
+
+export function createRoomOptionsFromSearch(gameId: GameId, search: string): CreateRoomOptions {
+  const params = new URLSearchParams(search);
+  const opponent = params.get("opponent") === "bot" ? "bot" : "friend";
+  const rawDifficulty = params.get("botDifficulty") ?? params.get("difficulty");
+  const botDifficulty = rawDifficulty && isBotDifficulty(rawDifficulty) ? rawDifficulty : "ruthless";
+  const rawVariant = params.get("boardVariant") ?? params.get("variant");
+  const boardVariant = rawVariant && isBoardVariantForGame(gameId, rawVariant) ? rawVariant : undefined;
+  const botStarts = canBotStart(gameId) && ["1", "true", "yes"].includes((params.get("botStarts") ?? "").toLowerCase());
+  return { opponent, botDifficulty, boardVariant, botStarts };
 }
 
 export function App() {
@@ -75,7 +86,7 @@ export function App() {
   useEffect(() => {
     const gameId = newGameMatch?.[1];
     if (gameId && isGameId(gameId) && !creatingGameId) {
-      void createRoom(gameId);
+      void createRoom(gameId, createRoomOptionsFromSearch(gameId, window.location.search));
     }
   }, [createRoom, creatingGameId, newGameMatch]);
 

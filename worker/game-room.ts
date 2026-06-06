@@ -246,10 +246,12 @@ export class GameRoom extends DurableObject<Env> {
     const existingSpectator = room.spectators.find(
       (spectator) => spectator.guestToken === guestToken
     );
+    let seatedParticipant = false;
 
     if (existingPlayer) {
       existingPlayer.name = name;
       existingPlayer.connected = true;
+      seatedParticipant = true;
     } else if (existingSpectator) {
       existingSpectator.name = name;
       existingSpectator.connected = true;
@@ -261,6 +263,7 @@ export class GameRoom extends DurableObject<Env> {
         connected: true,
         joinedAt: Date.now()
       });
+      seatedParticipant = true;
     } else {
       room.spectators.push({
         guestToken,
@@ -275,6 +278,7 @@ export class GameRoom extends DurableObject<Env> {
 
     this.sendRoom(ws, room, (snapshot) => ({ type: "room_snapshot", room: snapshot }));
     this.broadcastRoom(room, (snapshot) => ({ type: "presence_changed", room: snapshot }));
+    if (seatedParticipant) this.ctx.waitUntil(this.maybePlayBot(room));
   }
 
   private async handleMove(
@@ -615,7 +619,9 @@ export class GameRoom extends DurableObject<Env> {
     await this.finalizeRoomIfNeeded(room);
     if (room.opponent !== "bot" || room.game.winner) return;
 
-    const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
+    const bot = room.gameId === "word-hunt"
+      ? room.players.find((player) => player.isBot)
+      : room.players.find((player) => player.isBot && player.mark === room.game.turn);
     if (!bot) return;
 
     const delayMs = room.gameId === "four-in-a-row" && room.botDifficulty === "ruthless" ? 80 : BOT_MOVE_DELAY_MS;
@@ -645,7 +651,7 @@ export class GameRoom extends DurableObject<Env> {
 
     if (room.game.winner) {
       this.broadcastRoom(room, (snapshot) => ({ type: "game_over", room: snapshot, winner: snapshot.winner }));
-    } else if (room.players.some((player) => player.isBot && player.mark === room.game.turn)) {
+    } else if (room.gameId !== "word-hunt" && room.players.some((player) => player.isBot && player.mark === room.game.turn)) {
       await this.maybePlayBot(room);
     }
   }
