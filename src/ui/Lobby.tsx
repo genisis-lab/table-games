@@ -27,7 +27,9 @@ const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
     "last-card",
     "darts",
     "cup-pong",
-    "dominoes"
+    "dominoes",
+    "memory-match",
+    "dice-duel"
   ],
   Strategy: [
     "ultimate-tic-tac-toe",
@@ -39,9 +41,11 @@ const CATEGORY_GAMES: Record<Exclude<LibraryCategory, "All">, GameId[]> = {
     "mancala",
     "last-card",
     "word-hunt",
-    "dominoes"
+    "dominoes",
+    "order-and-chaos",
+    "quoridor"
   ],
-  Arcade: ["flappy-bird", "cup-pong", "darts", "word-hunt", "twenty-forty-eight"],
+  Arcade: ["flappy-bird", "cup-pong", "darts", "word-hunt", "dice-duel", "twenty-forty-eight"],
   Solo: ["flappy-bird", "twenty-forty-eight"]
 };
 
@@ -199,6 +203,10 @@ function descriptionFor(gameId: GameId): string {
   if (gameId === "word-hunt") return "Timed letter-grid races where every connected word you spot adds to your score.";
   if (gameId === "cup-pong") return "Clear the rack cup by cup with a clean table-top bounce feel.";
   if (gameId === "dominoes") return "A four-seat double-six table with bots ready to fill empty chairs.";
+  if (gameId === "order-and-chaos") return "One player builds a five-mark line while the other tries to make the board beautifully messy.";
+  if (gameId === "memory-match") return "Flip cards, remember symbols, and chain extra turns when you find pairs.";
+  if (gameId === "quoridor") return "Race your pawn across the maze while dropping walls that still leave a path.";
+  if (gameId === "dice-duel") return "A press-your-luck dice race: roll the pot higher or bank before the one appears.";
   if (gameId === "flappy-bird") return "A crisp little pipe-dodging sky run with random gaps and instant restarts.";
   if (gameId === "twenty-forty-eight") return "Slide chunky number tiles into bigger and bigger sparks.";
   return "Place, slide, make mills, and knock pieces off the board.";
@@ -349,6 +357,42 @@ function GamePreview({ gameId }: { gameId: GameId }) {
         {[[6, 6], [6, 4], [4, 2], [2, 5]].map(([left, right], index) => (
           <span key={index}><b>{left}</b><b>{right}</b></span>
         ))}
+      </div>
+    );
+  }
+
+  if (gameId === "order-and-chaos") {
+    return (
+      <div className="mini-order-chaos" aria-hidden="true">
+        {"XOXXOOXOXOOXXOXO".split("").map((mark, index) => <span key={index}>{mark}</span>)}
+      </div>
+    );
+  }
+
+  if (gameId === "memory-match") {
+    return (
+      <div className="mini-memory" aria-hidden="true">
+        {["★", "?", "◆", "?", "★", "●", "?", "◆"].map((mark, index) => <span key={index}>{mark}</span>)}
+      </div>
+    );
+  }
+
+  if (gameId === "quoridor") {
+    return (
+      <div className="mini-quoridor" aria-hidden="true">
+        {Array.from({ length: 25 }).map((_, index) => (
+          <span className={index === 2 ? "north" : index === 22 ? "south" : index === 7 || index === 12 || index === 17 ? "wall" : ""} key={index} />
+        ))}
+      </div>
+    );
+  }
+
+  if (gameId === "dice-duel") {
+    return (
+      <div className="mini-dice-duel" aria-hidden="true">
+        <span>5</span>
+        <span>2</span>
+        <strong>+7</strong>
       </div>
     );
   }

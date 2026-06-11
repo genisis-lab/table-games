@@ -985,6 +985,12 @@ function moveLabel(move: GameMove, point: { row: number; column: number }, gameI
     if (point.column < 0) return move.edge === "h" ? "Draw" : "Pass";
     return `Tile ${point.column + 1} ${point.row === 0 ? "left" : "right"}`;
   }
+  if (gameId === "order-and-chaos") return `${move.piece ?? "X"} at ${columnName(point.column)}${point.row + 1}`;
+  if (gameId === "memory-match") return `Flip ${point.row + 1}-${point.column + 1}`;
+  if (gameId === "quoridor") {
+    return move.edge ? `${move.edge.toUpperCase()} wall ${point.row + 1}-${point.column + 1}` : `Pawn ${columnName(point.column)}${point.row + 1}`;
+  }
+  if (gameId === "dice-duel") return move.action === "bank" ? "Bank" : "Roll";
   return `${columnName(point.column)}${point.row + 1}`;
 }
 

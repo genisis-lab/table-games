@@ -532,12 +532,18 @@ describe("New game engines", () => {
     expect(chooseBotMove(state, "p2", "ruthless")).toBeNull();
   });
 
-  it("registers 2048 as a solo game", () => {
+  it("registers Snake and 2048 as solo games", () => {
+    expect(getGameDefinition("snake")).toMatchObject({
+      name: "Snake",
+      supportsFriend: false
+    });
     expect(getGameDefinition("twenty-forty-eight")).toMatchObject({
       name: "2048",
       supportsFriend: false
     });
+    expect(isSoloGame("snake")).toBe(true);
     expect(isSoloGame("twenty-forty-eight")).toBe(true);
+    expect(chooseBotMove(createGameState("snake"), "p2", "ruthless")).toBeNull();
     expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
@@ -1141,6 +1147,46 @@ describe("New table games", () => {
     if (!result.ok) return;
     expect(result.state.meta?.dominoes?.chain[0]).toMatchObject(firstTile!);
     expect(result.state.turn).toBe("p2");
+  });
+
+  it("plays Order & Chaos marks through shared moves", () => {
+    const state = createGameState("order-and-chaos");
+    const result = applyGameMove(state, "p1", { column: 0, piece: "X" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.meta?.orderChaos?.board[0]).toBe("X");
+    expect(result.state.turn).toBe("p2");
+  });
+
+  it("masks unrevealed Memory Match cards", () => {
+    const state = createGameState("memory-match");
+    const result = applyGameMove(state, "p1", { column: 0 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const masked = maskGameMetaForPlayer(result.state.meta, "p2");
+    expect(masked?.memoryMatch?.cards[0].value).not.toBe(-1);
+    expect(masked?.memoryMatch?.cards[1].value).toBe(-1);
+  });
+
+  it("moves a Quoridor pawn toward the goal", () => {
+    const state = createGameState("quoridor");
+    const result = applyGameMove(state, "p1", { row: 7, column: 4 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.meta?.quoridor?.pawns.p1).toEqual({ row: 7, column: 4 });
+    expect(result.state.turn).toBe("p2");
+  });
+
+  it("rolls Dice Duel through shared moves", () => {
+    const state = createGameState("dice-duel");
+    const result = applyGameMove(state, "p1", { column: 0, action: "roll" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.meta?.diceDuel?.lastRoll?.dice.length).toBeGreaterThan(0);
   });
 });
 
