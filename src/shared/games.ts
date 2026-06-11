@@ -2093,10 +2093,34 @@ function chooseFourInARowMove(
   if (state.moveCount === 0) {
     return legalMoves.find((move) => move.column === 2) ?? legalMoves.find((move) => move.column === 4) ?? orderedFourMoves(state, legalMoves)[0];
   }
+  if (difficulty === "ruthless" && state.moveCount <= 2) {
+    return chooseFourInARowOpeningMove(state, legalMoves);
+  }
   if (difficulty === "casual") return chooseBySearch(state, player, legalMoves, 2);
   if (difficulty === "sharp") return chooseFourInARowBySearch(state, player, legalMoves, 4);
 
-  return chooseFourInARowBySearch(state, player, legalMoves, 6);
+  return chooseFourInARowBySearch(state, player, legalMoves, 4);
+}
+
+function chooseFourInARowOpeningMove(state: GameState, legalMoves: GameMove[]): GameMove {
+  const center = Math.floor(state.board[0].length / 2);
+  const opponentColumns = new Set<number>();
+  for (const row of state.board) {
+    row.forEach((cell, column) => {
+      if (cell && cell !== state.turn) opponentColumns.add(column);
+    });
+  }
+
+  const flankPreference = opponentColumns.has(center)
+    ? [center - 1, center + 1, center - 2, center + 2, center]
+    : [center - 1, center + 1, center, center - 2, center + 2];
+  const orderedColumns = [...flankPreference, 1, 5, 0, 6];
+
+  for (const column of orderedColumns) {
+    const move = legalMoves.find((candidate) => candidate.column === column);
+    if (move) return move;
+  }
+  return orderedFourMoves(state, legalMoves)[0];
 }
 
 function chooseFourInARowBySearch(

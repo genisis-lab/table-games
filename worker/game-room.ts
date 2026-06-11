@@ -70,6 +70,7 @@ const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
 const BOT_NAME = "Spark Bot";
 const BOT_MOVE_DELAY_MS = 520;
+const RUTHLESS_FOUR_BOT_DELAY_MS = 20;
 const WORD_HUNT_BOT_DELAY_MS: Record<BotDifficulty, number> = {
   casual: 1800,
   sharp: 1200,
@@ -633,7 +634,7 @@ export class GameRoom extends DurableObject<Env> {
     const bot = room.players.find((player) => player.isBot && player.mark === room.game.turn);
     if (!bot) return;
 
-    const delayMs = room.gameId === "four-in-a-row" && room.botDifficulty === "ruthless" ? 80 : BOT_MOVE_DELAY_MS;
+    const delayMs = room.gameId === "four-in-a-row" && room.botDifficulty === "ruthless" ? RUTHLESS_FOUR_BOT_DELAY_MS : BOT_MOVE_DELAY_MS;
     await sleep(delayMs);
 
     const move = chooseBotMove(room.game, bot.mark, room.botDifficulty);
