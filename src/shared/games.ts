@@ -15,6 +15,38 @@ import {
   normalizeCupPongMeta
 } from "../games/cup-pong/engine";
 import type { CupPongMeta, CupPongPlayerMark } from "../games/cup-pong/engine";
+import {
+  applyDiceDuelIntent,
+  chooseDiceDuelBotMove,
+  createDiceDuelMeta,
+  getDiceDuelLegalMoves,
+  normalizeDiceDuelMeta
+} from "../games/dice-duel/engine";
+import type { DiceDuelMeta } from "../games/dice-duel/engine";
+import {
+  applyMemoryMatchIntent,
+  chooseMemoryMatchBotMove,
+  createMemoryMatchMeta,
+  getMemoryMatchLegalMoves,
+  normalizeMemoryMatchMeta
+} from "../games/memory-match/engine";
+import type { MemoryMatchMeta } from "../games/memory-match/engine";
+import {
+  applyOrderChaosIntent,
+  chooseOrderChaosBotMove,
+  createOrderChaosMeta,
+  getOrderChaosLegalMoves,
+  normalizeOrderChaosMeta
+} from "../games/order-chaos/engine";
+import type { OrderChaosMeta, OrderChaosPiece } from "../games/order-chaos/engine";
+import {
+  applyQuoridorIntent,
+  chooseQuoridorBotMove,
+  createQuoridorMeta,
+  getQuoridorLegalMoves,
+  normalizeQuoridorMeta
+} from "../games/quoridor/engine";
+import type { QuoridorMeta, QuoridorMove } from "../games/quoridor/engine";
 
 export type { DominoMeta, DominoTile } from "../games/domino/engine";
 export type { CupPongMeta } from "../games/cup-pong/engine";
@@ -37,6 +69,10 @@ export type GameId =
   | "word-hunt"
   | "cup-pong"
   | "dominoes"
+  | "order-and-chaos"
+  | "memory-match"
+  | "quoridor"
+  | "dice-duel"
   | "flappy-bird"
   | "snake"
   | "twenty-forty-eight";
@@ -60,6 +96,8 @@ export interface GameMove {
   word?: string;
   power?: number;
   aim?: number;
+  piece?: "X" | "O";
+  action?: "roll" | "bank";
 }
 
 export interface DotsMeta {
@@ -191,6 +229,10 @@ export interface GameMeta {
   wordHunt?: WordHuntMeta;
   cupPong?: CupPongMeta;
   dominoes?: DominoMeta;
+  orderChaos?: OrderChaosMeta;
+  memoryMatch?: MemoryMatchMeta;
+  quoridor?: QuoridorMeta;
+  diceDuel?: DiceDuelMeta;
 }
 
 export interface GameDefinition {
@@ -386,6 +428,46 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     playerNames: { p1: "Seat 1", p2: "Seat 2", p3: "Seat 3", p4: "Seat 4" },
     supportsFriend: true
   },
+  "order-and-chaos": {
+    id: "order-and-chaos",
+    name: "Order & Chaos",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Order", p2: "Chaos" },
+    supportsFriend: true
+  },
+  "memory-match": {
+    id: "memory-match",
+    name: "Memory Match",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Finder 1", p2: "Finder 2" },
+    supportsFriend: true
+  },
+  quoridor: {
+    id: "quoridor",
+    name: "Quoridor",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "South", p2: "North" },
+    supportsFriend: true
+  },
+  "dice-duel": {
+    id: "dice-duel",
+    name: "Dice Duel",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Roller 1", p2: "Roller 2" },
+    supportsFriend: true
+  },
   "flappy-bird": {
     id: "flappy-bird",
     name: "Pipe Dash",
@@ -459,6 +541,24 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
     { id: "classic", label: "Teams 100", detail: "2v2 block dominoes" },
     { id: "wide", label: "FFA 100", detail: "every seat for itself" },
     { id: "party", label: "Teams 150", detail: "longer 2v2 match" }
+  ],
+  "order-and-chaos": [{ id: "classic", label: "6x6", detail: "line of 5" }],
+  "memory-match": [
+    { id: "mini", label: "6 pairs", detail: "quick deck" },
+    { id: "classic", label: "8 pairs", detail: "classic deck" },
+    { id: "wide", label: "10 pairs", detail: "bigger deck" },
+    { id: "party", label: "12 pairs", detail: "marathon deck" }
+  ],
+  quoridor: [
+    { id: "mini", label: "7 walls", detail: "fast race" },
+    { id: "classic", label: "10 walls", detail: "classic race" },
+    { id: "party", label: "12 walls", detail: "wall heavy" }
+  ],
+  "dice-duel": [
+    { id: "mini", label: "50", detail: "sprint" },
+    { id: "classic", label: "100", detail: "classic" },
+    { id: "wide", label: "120", detail: "long" },
+    { id: "party", label: "150 + 2 dice", detail: "wild" }
   ],
   "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }],
   snake: [{ id: "classic", label: "Classic", detail: "solo chase" }],
@@ -675,6 +775,14 @@ export function applyGameMove(
       return applyCupPongMove(state, player, move);
     case "dominoes":
       return applyDominoMove(state, player, move);
+    case "order-and-chaos":
+      return applyOrderChaosMove(state, player, move);
+    case "memory-match":
+      return applyMemoryMatchMove(state, player, move);
+    case "quoridor":
+      return applyQuoridorMove(state, player, move);
+    case "dice-duel":
+      return applyDiceDuelMove(state, player, move);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -714,6 +822,14 @@ export function getLegalMoves(state: GameState): GameMove[] {
       return getCupPongMoves(state, state.turn);
     case "dominoes":
       return getDominoMoves(state, state.turn);
+    case "order-and-chaos":
+      return getOrderChaosMoves(state, state.turn);
+    case "memory-match":
+      return getMemoryMatchMoves(state, state.turn);
+    case "quoridor":
+      return getQuoridorMoves(state, state.turn);
+    case "dice-duel":
+      return getDiceDuelMoves(state, state.turn);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -749,6 +865,22 @@ export function chooseBotMove(
 
   if (state.gameId === "dominoes") {
     return chooseDominoMove({ ...state, turn: player }, player, legalMoves, difficulty);
+  }
+
+  if (state.gameId === "order-and-chaos") {
+    return chooseOrderChaosMove({ ...state, turn: player }, player, difficulty);
+  }
+
+  if (state.gameId === "memory-match") {
+    return chooseMemoryMatchMove({ ...state, turn: player }, player, difficulty);
+  }
+
+  if (state.gameId === "quoridor") {
+    return chooseQuoridorMove({ ...state, turn: player }, player, difficulty);
+  }
+
+  if (state.gameId === "dice-duel") {
+    return chooseDiceDuelMove({ ...state, turn: player }, player, difficulty);
   }
 
   const winningMove = findImmediateWinningMove(state, player, legalMoves);
@@ -889,6 +1021,14 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   if (gameId === "cup-pong") return { cupPong: createCupPongMeta(variant) };
 
   if (gameId === "dominoes") return { dominoes: createDominoTableMeta(variant) };
+
+  if (gameId === "order-and-chaos") return { orderChaos: createOrderChaosMeta(variant) };
+
+  if (gameId === "memory-match") return { memoryMatch: createMemoryMatchMeta(variant) };
+
+  if (gameId === "quoridor") return { quoridor: createQuoridorMeta(variant) };
+
+  if (gameId === "dice-duel") return { diceDuel: createDiceDuelMeta(variant) };
 
   return undefined;
 }
@@ -1481,6 +1621,90 @@ function applyDominoMove(state: GameState, player: PlayerMark, move: GameMove): 
   };
 }
 
+function applyOrderChaosMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.orderChaos;
+  if (!meta) return { ok: false, state, reason: "The board is not ready." };
+  const piece: OrderChaosPiece = move.piece === "O" ? "O" : "X";
+  const result = applyOrderChaosIntent(meta, player, { index: move.column, piece });
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, orderChaos: result.meta }
+    }
+  };
+}
+
+function applyMemoryMatchMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.memoryMatch;
+  if (!meta) return { ok: false, state, reason: "The cards are not ready." };
+  const result = applyMemoryMatchIntent(meta, player, { index: move.column });
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, memoryMatch: result.meta }
+    }
+  };
+}
+
+function applyQuoridorMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.quoridor;
+  if (!meta) return { ok: false, state, reason: "The board is not ready." };
+  const engineMove: QuoridorMove = move.edge === "h" || move.edge === "v"
+    ? { type: "wall", row: move.row ?? 0, column: move.column, orientation: move.edge }
+    : { type: "pawn", row: move.row ?? 0, column: move.column };
+  const result = applyQuoridorIntent(meta, player, engineMove);
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, quoridor: result.meta }
+    }
+  };
+}
+
+function applyDiceDuelMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.diceDuel;
+  if (!meta) return { ok: false, state, reason: "The dice are not ready." };
+  const result = applyDiceDuelIntent(meta, player, { action: move.action === "bank" ? "bank" : "roll" });
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, diceDuel: result.meta }
+    }
+  };
+}
+
 function okMove(
   state: GameState,
   board: Cell[][],
@@ -1947,6 +2171,40 @@ function getDominoMoves(state: GameState, player: PlayerMark): GameMove[] {
     : [{ column: -1 }];
 }
 
+function getOrderChaosMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.orderChaos;
+  if (!meta) return [];
+  return getOrderChaosLegalMoves(normalizeOrderChaosMeta(meta), player).map((move) => ({
+    column: move.index,
+    piece: move.piece
+  }));
+}
+
+function getMemoryMatchMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.memoryMatch;
+  if (!meta) return [];
+  return getMemoryMatchLegalMoves(normalizeMemoryMatchMeta(meta), player).map((move) => ({ column: move.index }));
+}
+
+function getQuoridorMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.quoridor;
+  if (!meta) return [];
+  return getQuoridorLegalMoves(normalizeQuoridorMeta(meta), player).map((move) =>
+    move.type === "wall"
+      ? { row: move.row, column: move.column, edge: move.orientation }
+      : { row: move.row, column: move.column }
+  );
+}
+
+function getDiceDuelMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.diceDuel;
+  if (!meta) return [];
+  return getDiceDuelLegalMoves(normalizeDiceDuelMeta(meta), player).map((move) => ({
+    column: 0,
+    action: move.action
+  }));
+}
+
 function chooseLastCardMove(
   state: GameState,
   player: PlayerMark,
@@ -2027,6 +2285,40 @@ function chooseDominoMove(
   const meta = state.meta?.dominoes;
   if (!meta) return legalMoves[0];
   return chooseDominoBotMove(normalizeDominoMeta(meta), player as DominoPlayerMark, legalMoves, difficulty);
+}
+
+function chooseOrderChaosMove(state: GameState, player: PlayerMark, difficulty: BotDifficulty): GameMove {
+  const meta = state.meta?.orderChaos;
+  if (!meta) return { column: 0, piece: "X" };
+  const normalized = normalizeOrderChaosMeta(meta);
+  const choice = chooseOrderChaosBotMove(normalized, player, getOrderChaosLegalMoves(normalized, player), difficulty);
+  return { column: choice.index, piece: choice.piece };
+}
+
+function chooseMemoryMatchMove(state: GameState, player: PlayerMark, difficulty: BotDifficulty): GameMove {
+  const meta = state.meta?.memoryMatch;
+  if (!meta) return { column: 0 };
+  const normalized = normalizeMemoryMatchMeta(meta);
+  const choice = chooseMemoryMatchBotMove(normalized, player, getMemoryMatchLegalMoves(normalized, player), difficulty);
+  return { column: choice.index };
+}
+
+function chooseQuoridorMove(state: GameState, player: PlayerMark, difficulty: BotDifficulty): GameMove {
+  const meta = state.meta?.quoridor;
+  if (!meta) return { row: 0, column: 0 };
+  const normalized = normalizeQuoridorMeta(meta);
+  const choice = chooseQuoridorBotMove(normalized, player, getQuoridorLegalMoves(normalized, player), difficulty);
+  return choice.type === "wall"
+    ? { row: choice.row, column: choice.column, edge: choice.orientation }
+    : { row: choice.row, column: choice.column };
+}
+
+function chooseDiceDuelMove(state: GameState, player: PlayerMark, difficulty: BotDifficulty): GameMove {
+  const meta = state.meta?.diceDuel;
+  if (!meta) return { column: 0, action: "roll" };
+  const normalized = normalizeDiceDuelMeta(meta);
+  const choice = chooseDiceDuelBotMove(normalized, player, getDiceDuelLegalMoves(normalized, player), difficulty);
+  return { column: 0, action: choice.action };
 }
 
 function resolveTarget(state: GameState, move: GameMove): { ok: true; point: BoardPoint } | { ok: false; reason: string } {
@@ -3025,7 +3317,7 @@ function addUniquePlayer(values: PlayerMark[], value: PlayerMark): void {
 }
 
 export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
-  if (!meta?.lastCard && !meta?.dominoes && !meta?.battleship) return meta;
+  if (!meta?.lastCard && !meta?.dominoes && !meta?.battleship && !meta?.memoryMatch) return meta;
 
   const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
   if (meta.battleship && next.battleship) {
@@ -3070,6 +3362,13 @@ export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: Playe
   }
   if (meta.dominoes && next.dominoes) {
     next.dominoes = maskDominoMetaForPlayer(normalizeDominoMeta(meta.dominoes), player as DominoPlayerMark | undefined);
+  }
+  if (meta.memoryMatch && next.memoryMatch) {
+    const memory = next.memoryMatch;
+    const faceUp = new Set(memory.faceUp ?? []);
+    memory.cards = memory.cards.map((card, index) =>
+      card.matched || faceUp.has(index) ? card : { value: -1, matched: false }
+    );
   }
   return next;
 }
