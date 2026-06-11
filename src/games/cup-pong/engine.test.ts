@@ -74,7 +74,7 @@ describe("Cup Pong engine", () => {
 		expect(result.meta.ballsRemaining).toBe(6);
 	});
 
-	it("scores a successful redemption as a draw", () => {
+	it("sends a tied redemption to sudden-death overtime instead of a draw", () => {
 		const meta = freshMeta();
 		meta.redemption = { active: true, player: "p2" };
 		meta.cups.p1 = [true, false, false, false, false, false];
@@ -82,7 +82,24 @@ describe("Cup Pong engine", () => {
 		const result = applyCupPongIntent(meta, "p2", { column: 0 });
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.winner).toBe("draw");
+		expect(result.winner).toBeNull();
+		expect(result.meta.overtime).toBe(true);
+		// Both racks reset to the overtime size; the player who tied shoots first.
+		expect(result.meta.cups.p1.filter(Boolean).length).toBe(3);
+		expect(result.meta.cups.p2.filter(Boolean).length).toBe(3);
+		expect(result.nextTurn).toBe("p2");
+	});
+
+	it("wins outright when a rack is cleared in sudden-death overtime", () => {
+		const meta = freshMeta();
+		meta.overtime = true;
+		meta.cups.p1 = [true, true, true];
+		meta.cups.p2 = [true, false, false];
+		meta.ballsRemaining = CUP_PONG_BALLS_PER_TURN;
+		const result = applyCupPongIntent(meta, "p1", { column: 0 });
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.winner).toBe("p1");
 	});
 
 	it("awards the original shooter the win when redemption balls run out", () => {

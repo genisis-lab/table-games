@@ -9,14 +9,17 @@
 // Design notes
 // ------------
 // * The room engine (worker/game-room.ts) stays authoritative. A throw's
-//   hit/miss is resolved deterministically here from (power, aim) plus a seeded
-//   RNG stored on the meta, so every connected client can replay the identical
-//   shot purely from the broadcast RoomSnapshot.meta. No protocol change needed.
+//   hit/miss is resolved from (power, aim) plus fresh server-side entropy, and
+//   the resolved outcome is recorded on meta.lastThrow so every connected client
+//   renders the identical shot purely from the broadcast RoomSnapshot.meta. The
+//   per-snapshot seed is scrambled on every throw so it cannot be used to
+//   precompute an outcome. No protocol change needed.
 // * A throw with NO power/aim is a guaranteed make. This keeps legacy callers,
 //   bots that send a bare { column }, and the current simple board working
 //   unchanged, and keeps deterministic tests easy to write.
 // * 2 balls per turn. A make keeps the turn until both balls are used; clearing
-//   the rack opens a redemption round instead of an instant win.
+//   the rack opens a redemption round instead of an instant win. A tied
+//   redemption sends the game to sudden-death overtime rather than a draw.
 
 export type CupPongPlayerMark = "p1" | "p2" | "p3" | "p4";
 export type CupPongDifficulty = "casual" | "sharp" | "ruthless";
@@ -55,8 +58,10 @@ export interface CupPongMeta {
 	/** True when the current shooter's target rack can be usefully re-racked. */
 	reRackAvailable: boolean;
 	redemption: { active: boolean; player: CupPongPlayerMark | null };
+	/** True once a tied redemption has pushed the game into sudden-death overtime. */
+	overtime: boolean;
 	lastThrow: CupPongThrow | null;
-	/** Evolving xorshift32 seed; advanced on every resolved (power/aim) throw. */
+	/** Opaque per-snapshot seed; scrambled on every throw so clients can't predict shots. */
 	seed: number;
 }
 
@@ -73,6 +78,8 @@ export type CupPongIntentResult =
 export const CUP_PONG_BALLS_PER_TURN = 2;
 /** A move with column === -1 is a re-rack request rather than a throw. */
 export const CUP_PONG_RERACK_MOVE = -1;
+/** Sudden-death overtime resets both racks to this many cups. */
+const CUP_PONG_OVERTIME_RACK = 3;
 const CUP_PONG_RERACK_THRESHOLDS = new Set([6, 4, 3, 2]);
 
 function emptyCupCounts(): Record<CupPongPlayerMark, number> {
@@ -96,6 +103,10 @@ function liveCupCount(cups: boolean[]): number {
 	return cups.filter(Boolean).length;
 }
 
+function makeRack(size: number): boolean[] {
+	return Array.from({ length: size }, () => true);
+}
+
 function packCups(cups: boolean[]): boolean[] {
 	const alive = liveCupCount(cups);
 	return cups.map((_, index) => index < alive);
@@ -113,19 +124,6 @@ export function isCupPongReRackAvailable(meta: CupPongMeta, player: CupPongPlaye
 	return cupRackNeedsReRack(meta.cups[opponent] ?? []);
 }
 
-// xorshift32 - deterministic given the current seed. Advances meta.seed and
-// returns a unit float in [0, 1).
-function advanceSeed(meta: CupPongMeta): number {
-	let s = meta.seed | 0;
-	if (s === 0) s = 0x9e3779b9 | 0;
-	s ^= s << 13;
-	s ^= s >>> 17;
-	s ^= s << 5;
-	const next = s >>> 0;
-	meta.seed = next;
-	return (next % 1_000_000) / 1_000_000;
-}
-
 export function createCupPongMeta(variant: CupPongVariant): CupPongMeta {
 	const cupCount = variant === "party" ? 10 : 6;
 	return {
@@ -140,6 +138,7 @@ export function createCupPongMeta(variant: CupPongVariant): CupPongMeta {
 		ballsRemaining: CUP_PONG_BALLS_PER_TURN,
 		reRackAvailable: false,
 		redemption: { active: false, player: null },
+		overtime: false,
 		lastThrow: null,
 		seed: randomSeed(),
 	};
@@ -153,6 +152,7 @@ export function normalizeCupPongMeta(meta: CupPongMeta): CupPongMeta {
 	}
 	if (typeof meta.seed !== "number" || meta.seed === 0) meta.seed = randomSeed();
 	if (typeof meta.reRackAvailable !== "boolean") meta.reRackAvailable = false;
+	if (typeof meta.overtime !== "boolean") meta.overtime = false;
 	if (!meta.redemption) meta.redemption = { active: false, player: null };
 	if (meta.lastThrow === undefined) meta.lastThrow = null;
 	if (!meta.streak) meta.streak = emptyCupCounts();
@@ -164,6 +164,10 @@ function resolveThrow(
 	meta: CupPongMeta,
 	move: CupPongMove,
 ): { made: boolean; power: number; aim: number; accuracy: number; seed: number } {
+	// Scramble the broadcast seed on every throw so a modified client can never
+	// precompute an outcome from the snapshot. The shot is resolved from fresh
+	// server-side entropy and recorded on meta.lastThrow for deterministic replay.
+	meta.seed = randomSeed();
 	const hasInput = typeof move.power === "number" && typeof move.aim === "number";
 	if (!hasInput) {
 		// Guaranteed make: legacy callers and the "perfect" manual default.
@@ -174,7 +178,7 @@ function resolveThrow(
 	const powerError = Math.abs(power - 0.5) * 2; // 0 at the sweet spot, 1 at the extremes
 	const aimError = Math.abs(aim);
 	const accuracy = clampRange(1 - (powerError * 0.45 + aimError * 0.55), 0, 1);
-	const roll = advanceSeed(meta);
+	const roll = Math.random();
 	// roll is in [0, 1): accuracy 1 always makes, accuracy 0 always misses.
 	return { made: roll < accuracy, power, aim, accuracy, seed: meta.seed };
 }
@@ -230,13 +234,27 @@ export function applyCupPongIntent(
 	let winner: CupPongWinner = null;
 	let nextTurn: CupPongPlayerMark = player;
 
-	if (meta.redemption.active && meta.redemption.player === player) {
+	if (meta.overtime) {
+		// Sudden death: the next cleared rack wins outright, no further redemption.
+		if (opponentRemaining === 0) {
+			winner = player;
+			meta.ballsRemaining = CUP_PONG_BALLS_PER_TURN;
+		} else if (meta.ballsRemaining <= 0) {
+			meta.ballsRemaining = CUP_PONG_BALLS_PER_TURN;
+			nextTurn = opponent;
+		} else {
+			nextTurn = player;
+		}
+	} else if (meta.redemption.active && meta.redemption.player === player) {
 		// The player is taking redemption shots at the original shooter's rack.
 		if (opponentRemaining === 0) {
-			// Tied it up. Overtime is scored as a draw for Phase 1.
-			winner = "draw";
+			// Tied it up: go to sudden-death overtime instead of a forced draw.
+			meta.overtime = true;
 			meta.redemption = { active: false, player: null };
+			meta.cups[player] = makeRack(CUP_PONG_OVERTIME_RACK);
+			meta.cups[opponent] = makeRack(CUP_PONG_OVERTIME_RACK);
 			meta.ballsRemaining = CUP_PONG_BALLS_PER_TURN;
+			nextTurn = player; // the player who forced overtime shoots first
 		} else if (meta.ballsRemaining <= 0) {
 			// Redemption failed: the original shooter wins.
 			winner = opponent;
