@@ -1485,6 +1485,7 @@ describe("GameRoomView", () => {
               ballsRemaining: 2,
               reRackAvailable: false,
               redemption: { active: false, player: null },
+              overtime: false,
               lastThrow: null,
               seed: 42
             }
@@ -1557,6 +1558,7 @@ describe("GameRoomView", () => {
               ballsRemaining: 2,
               reRackAvailable: true,
               redemption: { active: false, player: null },
+              overtime: false,
               lastThrow: null,
               seed: 42
             }
