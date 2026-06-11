@@ -1,0 +1,224 @@
+diff --git a/src/ui/GameRoomView.tsx b/src/ui/GameRoomView.tsx
+--- a/src/ui/GameRoomView.tsx
++++ b/src/ui/GameRoomView.tsx
+@@ -600,6 +600,22 @@
+   if (room.gameId === "dominoes") {
+     return <DominoesBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
+   }
+ 
++  if (room.gameId === "order-and-chaos") {
++    return <OrderChaosBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
++  }
++
++  if (room.gameId === "memory-match") {
++    return <MemoryMatchBoard room={room} canMove={canMove} onMove={onMove} />;
++  }
++
++  if (room.gameId === "quoridor") {
++    return <QuoridorBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
++  }
++
++  if (room.gameId === "dice-duel") {
++    return <DiceDuelBoard room={room} canMove={canMove} onMove={onMove} />;
++  }
++
+   if (room.gameId === "snake") {
+     return <SnakeGame />;
+   }
+@@ -1300,6 +1316,228 @@
+ function DominoPips({ value }: { value: number }) {
+   return (
+     <span className={`domino-pips pips-${value}`}>
+       {Array.from({ length: value }).map((_, index) => <i key={index} />)}
+     </span>
+   );
+ }
++
++const MEMORY_ICONS = ["\ud83c\udf52", "\ud83c\udf4b", "\ud83d\udd14", "\u2b50", "\ud83c\udf40", "\ud83d\udc8e", "\ud83c\udfb2", "\ud83d\ude80", "\ud83c\udfb8", "\ud83c\udf38", "\ud83c\udf69", "\u26a1"];
++const DICE_PIPS = ["\u2680", "\u2681", "\u2682", "\u2683", "\u2684", "\u2685"];
++const QUORIDOR_CELL = 34;
++const QUORIDOR_GAP = 2;
++
++function OrderChaosBoard({ room, canMove, currentMark, onMove }: {
++  room: RoomSnapshot;
++  canMove: boolean;
++  currentMark?: PlayerMark;
++  onMove: (move: GameMove) => void;
++}) {
++  const meta = room.meta?.orderChaos;
++  const [piece, setPiece] = useState<"X" | "O">("X");
++  if (!meta) return null;
++  const size = meta.size;
++  return (
++    <div className="order-chaos-table" role="group" aria-label="Order and Chaos board" style= display: "flex", flexDirection: "column", alignItems: "center", gap: 14 >
++      <div className="order-chaos-status" style= opacity: 0.8 >
++        {currentMark === "p1" ? "You are Order \u2014 build a line of five" : currentMark === "p2" ? "You are Chaos \u2014 stop the line of five" : "Spectating"}
++      </div>
++      <div className="order-chaos-piece-pick" role="group" aria-label="Choose piece" style= display: "flex", gap: 8 >
++        {(["X", "O"] as const).map((option) => (
++          <button type="button" className={piece === option ? "mode-button active" : "mode-button"} aria-pressed={piece === option} disabled={!canMove} onClick={() => setPiece(option)} key={option}>{option}</button>
++        ))}
++      </div>
++      <div className="order-chaos-grid" role="group" aria-label="Order and Chaos grid" style={{ display: "grid", gridTemplateColumns: `repeat(${size}, 46px)`, gap: 4 }}>
++        {meta.board.map((cell, index) => (
++          <button
++            type="button"
++            className={`order-chaos-cell ${cell ? `piece-${cell}` : ""} ${meta.lastMove?.index === index ? "last-move" : ""}`}
++            aria-label={`Cell ${index + 1}${cell ? `, ${cell}` : ""}`}
++            disabled={!canMove || cell !== ""}
++            onClick={() => onMove({ column: index, piece })}
++            style= width: 46, height: 46, fontSize: 22, fontWeight: 700, display: "grid", placeItems: "center", borderRadius: 8 
++            key={index}
++          >
++            {cell || ""}
++          </button>
++        ))}
++      </div>
++    </div>
++  );
++}
++
++function MemoryMatchBoard({ room, canMove, onMove }: {
++  room: RoomSnapshot;
++  canMove: boolean;
++  onMove: (move: GameMove) => void;
++}) {
++  const meta = room.meta?.memoryMatch;
++  if (!meta) return null;
++  const columns = meta.columns;
++  const faceUp = new Set(meta.faceUp);
++  return (
++    <div className="memory-match-table" role="group" aria-label="Memory Match board" style= display: "flex", flexDirection: "column", alignItems: "center", gap: 14 >
++      <div className="memory-match-score" style= display: "flex", gap: 18 >
++        {(["p1", "p2"] as PlayerMark[]).map((mark) => (
++          <span className={room.turn === mark && !room.winner ? "active" : ""} style= fontWeight: room.turn === mark ? 700 : 400  key={mark}>
++            {playerNameFor(room.gameId, mark)} <strong>{meta.scores[mark]}</strong>
++          </span>
++        ))}
++        <span>Pairs left <strong>{meta.pairsRemaining}</strong></span>
++      </div>
++      <div className="memory-match-grid" role="group" aria-label="Cards" style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 56px)`, gap: 6 }}>
++        {meta.cards.map((card, index) => {
++          const revealed = card.matched || faceUp.has(index);
++          const icon = card.value >= 0 ? MEMORY_ICONS[card.value % MEMORY_ICONS.length] : "?";
++          return (
++            <button
++              type="button"
++              className={`memory-card ${revealed ? "face-up" : "face-down"} ${card.matched ? "matched" : ""}`}
++              aria-label={revealed ? `Card ${icon}` : `Hidden card ${index + 1}`}
++              disabled={!canMove || revealed}
++              onClick={() => onMove({ column: index })}
++              style= width: 56, height: 72, fontSize: 26, display: "grid", placeItems: "center", borderRadius: 8, opacity: card.matched ? 0.55 : 1 
++              key={index}
++            >
++              {revealed ? icon : "?"}
++            </button>
++          );
++        })}
++      </div>
++    </div>
++  );
++}
++
++function QuoridorBoard({ room, canMove, currentMark, onMove }: {
++  room: RoomSnapshot;
++  canMove: boolean;
++  currentMark?: PlayerMark;
++  onMove: (move: GameMove) => void;
++}) {
++  const meta = room.meta?.quoridor;
++  const [mode, setMode] = useState<"pawn" | "h" | "v">("pawn");
++  if (!meta) return null;
++  const size = meta.size;
++  const step = QUORIDOR_CELL + QUORIDOR_GAP;
++  const boardPx = size * QUORIDOR_CELL + (size - 1) * QUORIDOR_GAP;
++  const place = (row: number, column: number) => {
++    if (!canMove) return;
++    if (mode === "pawn") onMove({ row, column });
++    else onMove({ row, column, edge: mode });
++  };
++  return (
++    <div className="quoridor-table" role="group" aria-label="Quoridor board" style= display: "flex", flexDirection: "column", alignItems: "center", gap: 14 >
++      <div className="quoridor-status" style= display: "flex", gap: 16, alignItems: "center" >
++        <span>{currentMark === "p1" ? "You are South" : currentMark === "p2" ? "You are North" : "Spectating"}</span>
++        <span>Walls \u2014 {playerNameFor(room.gameId, "p1")} <strong>{meta.wallsRemaining.p1}</strong> \u00b7 {playerNameFor(room.gameId, "p2")} <strong>{meta.wallsRemaining.p2}</strong></span>
++      </div>
++      <div className="quoridor-modes" role="group" aria-label="Move mode" style= display: "flex", gap: 8 >
++        {([["pawn", "Move pawn"], ["h", "Wall \u2014"], ["v", "Wall |"]] as const).map(([value, label]) => (
++          <button type="button" className={mode === value ? "mode-button active" : "mode-button"} aria-pressed={mode === value} disabled={!canMove} onClick={() => setMode(value)} key={value}>{label}</button>
++        ))}
++      </div>
++      <div className="quoridor-grid" role="group" aria-label="Quoridor grid" style={{ position: "relative", width: boardPx, height: boardPx, display: "grid", gridTemplateColumns: `repeat(${size}, ${QUORIDOR_CELL}px)`, gridTemplateRows: `repeat(${size}, ${QUORIDOR_CELL}px)`, gap: QUORIDOR_GAP }}>
++        {Array.from({ length: size * size }).map((_, index) => {
++          const row = Math.floor(index / size);
++          const column = index % size;
++          const isP1 = meta.pawns.p1.row === row && meta.pawns.p1.column === column;
++          const isP2 = meta.pawns.p2.row === row && meta.pawns.p2.column === column;
++          return (
++            <button
++              type="button"
++              className={`quoridor-cell ${isP1 ? "pawn-p1" : ""} ${isP2 ? "pawn-p2" : ""}`}
++              aria-label={`Row ${row + 1}, column ${column + 1}${isP1 ? ", South pawn" : isP2 ? ", North pawn" : ""}`}
++              disabled={!canMove}
++              onClick={() => place(row, column)}
++              style= display: "grid", placeItems: "center", borderRadius: 6, background: (row + column) % 2 ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)" 
++              key={index}
++            >
++              {isP1 ? <span style= width: 22, height: 22, borderRadius: "50%", background: "#4aa3ff"  /> : isP2 ? <span style= width: 22, height: 22, borderRadius: "50%", background: "#ff6b6b"  /> : null}
++            </button>
++          );
++        })}
++        {meta.walls.map((wall, index) => {
++          const style: CSSProperties = wall.orientation === "h"
++            ? { position: "absolute", left: wall.column * step, top: wall.row * step + QUORIDOR_CELL - 1, width: 2 * QUORIDOR_CELL + QUORIDOR_GAP, height: 6, background: "#ffd166", borderRadius: 3 }
++            : { position: "absolute", top: wall.row * step, left: wall.column * step + QUORIDOR_CELL - 1, width: 6, height: 2 * QUORIDOR_CELL + QUORIDOR_GAP, background: "#ffd166", borderRadius: 3 };
++          return <span className="quoridor-wall" aria-hidden="true" style={style} key={index} />;
++        })}
++      </div>
++    </div>
++  );
++}
++
++function DiceDuelBoard({ room, canMove, onMove }: {
++  room: RoomSnapshot;
++  canMove: boolean;
++  onMove: (move: GameMove) => void;
++}) {
++  const meta = room.meta?.diceDuel;
++  if (!meta) return null;
++  const last = meta.lastRoll;
++  return (
++    <div className="dice-duel-table" role="group" aria-label="Dice Duel board" style= display: "flex", flexDirection: "column", alignItems: "center", gap: 16 >
++      <div className="dice-duel-score" style= display: "flex", gap: 18 >
++        {(["p1", "p2"] as PlayerMark[]).map((mark) => (
++          <span className={room.turn === mark && !room.winner ? "active" : ""} style= fontWeight: room.turn === mark ? 700 : 400  key={mark}>
++            {playerNameFor(room.gameId, mark)} <strong>{meta.scores[mark]}</strong>
++          </span>
++        ))}
++        <span>Target <strong>{meta.target}</strong></span>
++      </div>
++      <div className="dice-duel-pot" style= fontSize: 18 >Pot <strong>{meta.pot}</strong></div>
++      <div className="dice-duel-dice" aria-label="Last roll" style= display: "flex", gap: 10, fontSize: 46, minHeight: 54 >
++        {last ? last.dice.map((die, index) => (
++          <span aria-label={`Die ${die}`} key={index}>{DICE_PIPS[(die - 1) % 6]}</span>
++        )) : <span style= opacity: 0.5 >Roll to start the pot</span>}
++      </div>
++      <div className="dice-duel-event" aria-live="polite" style= minHeight: 20, opacity: 0.8 >
++        {last ? (last.wiped ? `${playerNameFor(room.gameId, last.roller)} rolled snake eyes \u2014 score wiped!` : last.bust ? `${playerNameFor(room.gameId, last.roller)} busted the pot.` : `${playerNameFor(room.gameId, last.roller)} added ${last.gained} to the pot.`) : ""}
++      </div>
++      <div className="dice-duel-actions" style= display: "flex", gap: 12 >
++        <button type="button" className="primary-button" disabled={!canMove} onClick={() => onMove({ column: 0, action: "roll" })}>Roll</button>
++        <button type="button" className="mode-button" disabled={!canMove || meta.pot <= 0} onClick={() => onMove({ column: 0, action: "bank" })}>Bank{meta.pot > 0 ? ` ${meta.pot}` : ""}</button>
++      </div>
++    </div>
++  );
++}
+ 
+ type SnakeDirection = "up" | "down" | "left" | "right";
+@@ -1880,6 +2118,10 @@
+   if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";
++  if (gameId === "order-and-chaos") return "Place an X or an O on any empty cell. Order wins by making a line of five; Chaos wins by filling the board with no line.";
++  if (gameId === "memory-match") return "Flip two cards on your turn. Match a pair to score and go again; a miss passes the turn. Most pairs wins.";
++  if (gameId === "quoridor") return "Race your pawn to the far row. Spend walls to lengthen your opponent's path, but never block it off completely.";
++  if (gameId === "dice-duel") return "Roll to build a pot, but rolling a 1 busts it. Bank to keep the points and pass. First to the target score wins.";
+   if (gameId === "flappy-bird") return "Thread the flyer through shifting pipe gaps and chase a clean high score.";
