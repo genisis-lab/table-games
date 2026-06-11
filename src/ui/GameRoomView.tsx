@@ -527,7 +527,7 @@ function FourInARowBoard({
     >
       {Array.from({ length: 7 }).map((_, columnIndex) => (
         <button
-          className="connect-column"
+          className={`connect-column ${lastMove?.column === columnIndex ? `last-column last-column-${lastMove.player}` : ""}`}
           type="button"
           aria-label={`Column ${columnIndex + 1}`}
           disabled={!canMove || Boolean(room.board[0][columnIndex])}
@@ -536,9 +536,11 @@ function FourInARowBoard({
         >
           {room.board.map((row, rowIndex) => {
             const cell = row[columnIndex];
+            const last = isLastMove(lastMove, rowIndex, columnIndex);
             return (
               <span
-                className={`connect-slot ${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
+                className={`connect-slot ${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${last ? `last-move last-${lastMove?.player}` : ""}`}
+                style={last ? { "--drop-distance": `${Math.max(2, rowIndex + 1) * 118}%` } as CSSProperties : undefined}
                 key={`${rowIndex}-${columnIndex}`}
               >
                 <span />
@@ -761,24 +763,81 @@ function GridStoneBoard({
   className: string;
   lastMove: AppliedMove | null;
 }) {
+  const legalMoveKeys = useMemo(() => {
+    if (room.gameId !== "reversi") return null;
+    return reversiLegalMoveKeys(room.board, room.turn);
+  }, [room]);
+
   return (
     <div className={className} role="group" aria-label={label}>
       {room.board.flatMap((row, rowIndex) =>
-        row.map((cell, columnIndex) => (
-          <button
-            className={`${cell ?? ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
-            type="button"
-            aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
-            disabled={!canMove || Boolean(cell)}
-            onClick={() => onMove({ row: rowIndex, column: columnIndex })}
-            key={`${rowIndex}-${columnIndex}`}
-          >
-            <span />
-          </button>
-        ))
+        row.map((cell, columnIndex) => {
+          const key = `${rowIndex},${columnIndex}`;
+          const legalMove = legalMoveKeys ? legalMoveKeys.has(key) : !cell;
+          return (
+            <button
+              className={`${cell ?? ""} ${legalMove && !cell ? "legal-move" : ""} ${isWinning(room, rowIndex, columnIndex) ? "win" : ""} ${isLastMove(lastMove, rowIndex, columnIndex) ? "last-move" : ""}`}
+              type="button"
+              aria-label={`Row ${rowIndex + 1}, column ${columnIndex + 1}`}
+              disabled={!canMove || Boolean(cell) || !legalMove}
+              onClick={() => onMove({ row: rowIndex, column: columnIndex })}
+              key={key}
+            >
+              <span />
+            </button>
+          );
+        })
       )}
     </div>
   );
+}
+
+const REVERSI_UI_DIRECTIONS = [
+  { row: -1, column: -1 }, { row: -1, column: 0 }, { row: -1, column: 1 },
+  { row: 0, column: -1 }, { row: 0, column: 1 },
+  { row: 1, column: -1 }, { row: 1, column: 0 }, { row: 1, column: 1 }
+] as const;
+
+function reversiLegalMoveKeys(board: Cell[][], player: PlayerMark): Set<string> {
+  const opponent = player === "p1" ? "p2" : "p1";
+  const keys = new Set<string>();
+
+  for (let row = 0; row < board.length; row += 1) {
+    for (let column = 0; column < board[row].length; column += 1) {
+      if (board[row][column]) continue;
+      const captures = REVERSI_UI_DIRECTIONS.some((direction) =>
+        reversiCapturesInDirection(board, player, opponent, { row, column }, direction)
+      );
+      if (captures) keys.add(`${row},${column}`);
+    }
+  }
+
+  return keys;
+}
+
+function reversiCapturesInDirection(
+  board: Cell[][],
+  player: PlayerMark,
+  opponent: PlayerMark,
+  start: BoardPoint,
+  direction: BoardPoint
+): boolean {
+  let row = start.row + direction.row;
+  let column = start.column + direction.column;
+  let seenOpponent = false;
+
+  while (row >= 0 && row < board.length && column >= 0 && column < board[row].length) {
+    const cell = board[row][column];
+    if (cell === opponent) {
+      seenOpponent = true;
+      row += direction.row;
+      column += direction.column;
+      continue;
+    }
+    return seenOpponent && cell === player;
+  }
+
+  return false;
 }
 
 function CheckersBoard({

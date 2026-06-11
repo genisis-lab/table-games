@@ -105,6 +105,54 @@ describe("GameRoomView", () => {
     expect(screen.getAllByText("🔥").length).toBeGreaterThan(1);
   });
 
+  it("only enables legal Reversi placement moves", () => {
+    const onMove = vi.fn();
+    const reversiBoard = Array.from({ length: 8 }, () => Array.from<Cell>({ length: 8 }).fill(null));
+    reversiBoard[3][3] = "p2";
+    reversiBoard[3][4] = "p1";
+    reversiBoard[4][3] = "p1";
+    reversiBoard[4][4] = "p2";
+    const reversiRoom: RoomSnapshot = {
+      ...room,
+      gameId: "reversi",
+      board: reversiBoard,
+      turn: "p1",
+      winner: null,
+      winningLine: [],
+      moveCount: 0
+    };
+
+    render(
+      <GameRoomView
+        room={reversiRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    const board = screen.getByLabelText("Reversi board");
+    const enabledSquares = within(board).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
+
+    expect(enabledSquares).toHaveLength(4);
+    expect(within(board).getByRole("button", { name: "Row 1, column 1" })).toBeDisabled();
+    expect(within(board).getByRole("button", { name: "Row 3, column 4" })).toHaveClass("legal-move");
+
+    fireEvent.click(within(board).getByRole("button", { name: "Row 3, column 4" }));
+    expect(onMove).toHaveBeenCalledWith({ row: 2, column: 3 });
+  });
+
   it("renders the rebuilt Domino table and sends selected legal-end moves", () => {
     const onMove = vi.fn();
     const dominoRoom: RoomSnapshot = {

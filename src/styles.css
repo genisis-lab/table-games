@@ -1077,6 +1077,7 @@ button:disabled {
 }
 
 .connect-column {
+  position: relative;
   display: grid;
   grid-template-rows: repeat(6, minmax(0, 1fr));
   gap: clamp(7px, 1.1vw, 12px);
@@ -1085,6 +1086,46 @@ button:disabled {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.connect-column.last-column::before {
+  position: absolute;
+  z-index: 0;
+  inset: calc(clamp(7px, 1.1vw, 12px) * -0.5) -4px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 253 247 / 0%) 0%,
+      rgb(255 253 247 / 62%) 18%,
+      rgb(255 253 247 / 18%) 52%,
+      rgb(255 253 247 / 0%) 100%
+    );
+  content: "";
+  pointer-events: none;
+  animation: connect-drop-lane 0.78s ease-out both;
+}
+
+.connect-column.last-column-p1::before {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 88 76 / 0%) 0%,
+      rgb(255 181 167 / 78%) 18%,
+      rgb(255 88 76 / 22%) 54%,
+      rgb(255 88 76 / 0%) 100%
+    );
+}
+
+.connect-column.last-column-p2::before {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 211 61 / 0%) 0%,
+      rgb(255 244 154 / 84%) 18%,
+      rgb(255 211 61 / 26%) 54%,
+      rgb(255 211 61 / 0%) 100%
+    );
 }
 
 .connect-column:not(:disabled):hover .connect-slot:first-child span {
@@ -1099,12 +1140,46 @@ button:disabled {
 }
 
 .connect-slot {
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
   aspect-ratio: 1;
   min-width: 0;
   border-radius: 50%;
   background: var(--blue-deep);
+}
+
+.connect-slot.last-move {
+  z-index: 2;
+  animation: connect-slot-impact 0.7s ease-out both;
+}
+
+.connect-slot.last-move::after {
+  position: absolute;
+  inset: -9%;
+  border: clamp(3px, 0.55vw, 5px) solid #fffdf7;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px rgb(24 34 41 / 42%),
+    0 0 18px rgb(255 253 247 / 64%);
+  content: "";
+  pointer-events: none;
+  animation: connect-landing-ring 0.9s ease-out both;
+}
+
+.connect-slot.last-p1::after {
+  border-color: #ffb5a7;
+  box-shadow:
+    0 0 0 3px rgb(190 32 32 / 48%),
+    0 0 20px rgb(255 80 68 / 55%);
+}
+
+.connect-slot.last-p2::after {
+  border-color: #fff49a;
+  box-shadow:
+    0 0 0 3px rgb(184 122 0 / 48%),
+    0 0 20px rgb(255 211 61 / 58%);
 }
 
 .connect-slot span {
@@ -1440,7 +1515,17 @@ button:disabled {
 }
 
 .reversi-board button {
+  position: relative;
   background: transparent;
+}
+
+.reversi-board button.legal-move::after {
+  width: 28%;
+  height: 28%;
+  border: 2px dashed rgb(255 248 230 / 72%);
+  border-radius: 50%;
+  background: rgb(255 248 230 / 18%);
+  content: "";
 }
 
 .reversi-board button span,
@@ -1914,13 +1999,16 @@ button:disabled {
   box-shadow: 0 3px 4px rgb(0 0 0 / 22%);
 }
 
-.connect-slot.last-move span,
 .gomoku-board .last-move span,
 .reversi-board .last-move span,
 .checkers-board .last-move span,
 .hex-board .last-move span,
 .morris-board .last-move span {
   animation: piece-pop 0.48s cubic-bezier(0.18, 1.42, 0.32, 1) both;
+}
+
+.connect-slot.last-move span {
+  animation: connect-disc-drop 0.82s cubic-bezier(0.1, 0.9, 0.16, 1.16) both;
 }
 
 .tic-board .last-move .tic-mark,
@@ -1962,6 +2050,74 @@ button:disabled {
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes connect-disc-drop {
+  0% {
+    opacity: 0.2;
+    transform: translateY(calc(-1 * var(--drop-distance, 640%))) scale(0.82);
+    filter: blur(0.7px);
+  }
+  42% {
+    opacity: 1;
+    transform: translateY(-18%) scale(1);
+    filter: blur(0);
+  }
+  62% {
+    opacity: 1;
+    transform: translateY(11%) scale(1.08);
+  }
+  78% {
+    transform: translateY(-6%) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes connect-slot-impact {
+  0%,
+  54% {
+    transform: scale(1);
+  }
+  68% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes connect-drop-lane {
+  0% {
+    opacity: 0;
+    transform: translateY(-12%) scaleY(0.2);
+  }
+  22% {
+    opacity: 0.9;
+    transform: translateY(0) scaleY(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8%) scaleY(1);
+  }
+}
+
+@keyframes connect-landing-ring {
+  0% {
+    opacity: 0;
+    transform: scale(0.62);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.95;
+    transform: scale(1);
   }
 }
 
