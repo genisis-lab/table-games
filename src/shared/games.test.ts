@@ -532,18 +532,12 @@ describe("New game engines", () => {
     expect(chooseBotMove(state, "p2", "ruthless")).toBeNull();
   });
 
-  it("registers Snake and 2048 as solo games", () => {
-    expect(getGameDefinition("snake")).toMatchObject({
-      name: "Snake",
-      supportsFriend: false
-    });
+  it("registers 2048 as a solo game", () => {
     expect(getGameDefinition("twenty-forty-eight")).toMatchObject({
       name: "2048",
       supportsFriend: false
     });
-    expect(isSoloGame("snake")).toBe(true);
     expect(isSoloGame("twenty-forty-eight")).toBe(true);
-    expect(chooseBotMove(createGameState("snake"), "p2", "ruthless")).toBeNull();
     expect(chooseBotMove(createGameState("twenty-forty-eight"), "p2", "ruthless")).toBeNull();
   });
 
