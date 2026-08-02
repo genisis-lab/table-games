@@ -1,6 +1,6 @@
 // src/games/cup-pong/engine.ts
 //
-// Self-contained Cup Pong engine for Table Sparks.
+// Self-contained Cup Pong engine for Table Games.
 //
 // This mirrors the structure of src/games/domino/engine.ts: the module owns all
 // Cup Pong rules, bot logic, and state, and is wired into src/shared/games.ts
