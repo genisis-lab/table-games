@@ -21,6 +21,7 @@ afterEach(() => {
 describe("resolveApiOrigin", () => {
   it("uses the deployed Worker API when the app is served from Cloudflare Pages", () => {
     expect(resolveApiOrigin("table-sparks-game.pages.dev")).toBe("https://table-sparks.neil27.workers.dev");
+    expect(resolveApiOrigin("table.builtwai.com")).toBe("https://table-sparks.neil27.workers.dev");
   });
 
   it("keeps local and explicit API origins unchanged", () => {

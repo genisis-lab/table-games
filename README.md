@@ -1,6 +1,6 @@
-# Table Sparks
+# Table Games
 
-Table Sparks is a deploy-ready browser board-game platform built with React,
+Table Games is a deploy-ready browser board-game platform built with React,
 TypeScript, Vite, Cloudflare Workers, and Durable Objects.
 
 V1 includes:
@@ -52,7 +52,7 @@ broadcasts snapshots over WebSockets, and masks private card/tile data per viewe
 ## Dominoes
 
 Dominoes is implemented as a pure engine under `src/games/domino/engine` and then
-adapted into the shared Table Sparks room shell.
+adapted into the shared Table Games room shell.
 
 - Standard double-six set, four seats, seven tiles per player.
 - `Teams 100`: partnership mode with seats 1+3 vs 2+4.
