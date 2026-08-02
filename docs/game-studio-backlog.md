@@ -1,4 +1,4 @@
-# Table Sparks Game Studio Backlog
+# Table Games Game Studio Backlog
 
 These are the six follow-up tracks we discussed. Keep this list as the working note until we decide which pass to do next.
 

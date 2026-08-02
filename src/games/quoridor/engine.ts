@@ -1,6 +1,6 @@
 // src/games/quoridor/engine.ts
 //
-// Self-contained Quoridor engine for Table Sparks.
+// Self-contained Quoridor engine for Table Games.
 //
 // Mirrors src/games/cup-pong/engine.ts. Two pawns race across a 9x9 board: p1
 // starts on the bottom row aiming for the top row; p2 starts on the top row

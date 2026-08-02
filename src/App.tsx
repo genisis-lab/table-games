@@ -22,6 +22,7 @@ export interface CreateRoomOptions {
 export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
   const cleanEnvOrigin = envOrigin?.replace(/\/$/, "") ?? "";
   if (cleanEnvOrigin) return cleanEnvOrigin;
+  if (hostname === "table.builtwai.com") return "";
   if (hostname === "table-sparks-game.pages.dev" || hostname.endsWith(".table-sparks-game.pages.dev")) {
     return DEPLOYED_WORKER_ORIGIN;
   }
@@ -126,8 +127,8 @@ function RoomRoute({
       <main className="join-screen">
         <section className="join-panel" aria-label="Join room">
           <div className="brand-lockup">
-            <span className="brand-mark">TS</span>
-            <span>Table Sparks</span>
+            <span className="brand-mark">TG</span>
+            <span>Table Games</span>
           </div>
           <h1>Pick your table name.</h1>
           <p>Guest rooms are instant. No account, no lobby maze, just a name at the table.</p>
@@ -261,7 +262,7 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
   if (!room) {
     return (
       <main className="loading-room">
-        <div className="loading-token">Table Sparks</div>
+        <div className="loading-token">Table Games</div>
         <p>Pulling up the chairs...</p>
       </main>
     );

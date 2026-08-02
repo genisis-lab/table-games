@@ -204,8 +204,8 @@ export function GameRoomView({
           <Home size={18} />
         </a>
         <div className="rail-brand">
-          <span className="brand-mark">TS</span>
-          <span>Table Sparks</span>
+          <span className="brand-mark">TG</span>
+          <span>Table Games</span>
         </div>
         <div className="rail-games">
           {GAME_IDS.map((gameId) => (

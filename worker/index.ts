@@ -22,7 +22,7 @@ export default {
       }
 
       if (url.pathname === "/api/health") {
-        return withCors(Response.json({ ok: true, service: "table-sparks" }));
+        return withCors(Response.json({ ok: true, service: "table-games" }));
       }
 
       if (url.pathname === "/api/rooms" && request.method === "POST") {

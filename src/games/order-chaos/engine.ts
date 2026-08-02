@@ -1,6 +1,6 @@
 // src/games/order-chaos/engine.ts
 //
-// Self-contained Order and Chaos engine for Table Sparks.
+// Self-contained Order and Chaos engine for Table Games.
 //
 // Mirrors src/games/cup-pong/engine.ts. p1 plays "Order" and wins by forming a
 // line of five identical marks (horizontal, vertical, or diagonal) anywhere on

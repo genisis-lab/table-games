@@ -7,7 +7,7 @@ describe("Lobby", () => {
     const onCreateRoom = vi.fn();
     render(<Lobby onCreateRoom={onCreateRoom} creatingGameId={null} />);
 
-    expect(screen.getByRole("heading", { name: "Table Sparks" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Table Games" })).toBeInTheDocument();
     expect(screen.getByText("Four in a Row")).toBeInTheDocument();
     expect(screen.getByText("Tic Tac Toe")).toBeInTheDocument();
     expect(screen.getByText("Gomoku")).toBeInTheDocument();
