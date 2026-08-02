@@ -22,11 +22,8 @@ export interface CreateRoomOptions {
 export function resolveApiOrigin(hostname: string, envOrigin?: string): string {
   const cleanEnvOrigin = envOrigin?.replace(/\/$/, "") ?? "";
   if (cleanEnvOrigin) return cleanEnvOrigin;
-  if (
-    hostname === "table.builtwai.com" ||
-    hostname === "table-sparks-game.pages.dev" ||
-    hostname.endsWith(".table-sparks-game.pages.dev")
-  ) {
+  if (hostname === "table.builtwai.com") return "";
+  if (hostname === "table-sparks-game.pages.dev" || hostname.endsWith(".table-sparks-game.pages.dev")) {
     return DEPLOYED_WORKER_ORIGIN;
   }
   return "";
