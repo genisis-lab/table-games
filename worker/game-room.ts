@@ -66,6 +66,7 @@ interface SocketAttachment {
 }
 
 const ROOM_KEY = "room";
+const ROOM_INACTIVITY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
 const BOT_NAME = "Spark Bot";
@@ -232,6 +233,29 @@ export class GameRoom extends DurableObject<Env> {
 
   async webSocketError(ws: WebSocket): Promise<void> {
     await this.webSocketClose(ws);
+  }
+
+  async alarm(): Promise<void> {
+    const room = this.room ?? await this.ctx.storage.get<StoredRoom>(ROOM_KEY) ?? null;
+    if (!room) {
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    const expiresAt = room.updatedAt + ROOM_INACTIVITY_TTL_MS;
+    if (expiresAt > Date.now()) {
+      await this.ctx.storage.setAlarm(expiresAt);
+      return;
+    }
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.close(1001, "Room expired");
+      } catch {
+        // A stale socket must not prevent durable cleanup.
+      }
+    }
+    this.activeWordHuntBotRooms.clear();
+    this.room = null;
+    await this.ctx.storage.deleteAll();
   }
 
   private async handleJoin(
@@ -744,6 +768,9 @@ export class GameRoom extends DurableObject<Env> {
     const stored = await this.ctx.storage.get<StoredRoom>(ROOM_KEY);
     if (stored) {
       this.room = this.ensureRoomShape(stored, roomId);
+      if ((await this.ctx.storage.getAlarm()) === null) {
+        await this.ctx.storage.setAlarm(this.room.updatedAt + ROOM_INACTIVITY_TTL_MS);
+      }
       return stored;
     }
 
@@ -777,6 +804,7 @@ export class GameRoom extends DurableObject<Env> {
   private async saveRoom(room: StoredRoom): Promise<void> {
     this.room = room;
     await this.ctx.storage.put(ROOM_KEY, room);
+    await this.ctx.storage.setAlarm(room.updatedAt + ROOM_INACTIVITY_TTL_MS);
   }
 
   private async finalizeRoomIfNeeded(room: StoredRoom): Promise<void> {
