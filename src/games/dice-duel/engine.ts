@@ -1,6 +1,6 @@
 // src/games/dice-duel/engine.ts
 //
-// Self-contained Dice Duel engine for Table Sparks.
+// Self-contained Dice Duel engine for Table Games.
 //
 // Mirrors src/games/cup-pong/engine.ts: this module owns all Dice Duel rules,
 // bot logic, and state, and is wired into src/shared/games.ts through thin

@@ -70,8 +70,8 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
     <main className="lobby-shell">
       <header className="lobby-topbar">
         <div className="brand-lockup">
-          <span className="brand-mark">TS</span>
-          <span>Table Sparks</span>
+          <span className="brand-mark">TG</span>
+          <span>Table Games</span>
         </div>
         <div className="topbar-actions" aria-label="Room features">
           <span><Link2 size={16} /> Invites</span>
@@ -82,7 +82,7 @@ export function Lobby({ onCreateRoom, creatingGameId }: LobbyProps) {
 
       <section className="lobby-stage" aria-labelledby="lobby-title">
         <div className="lobby-copy">
-          <h1 id="lobby-title">Table Sparks</h1>
+          <h1 id="lobby-title">Table Games</h1>
           <p>
             Board-game tables for quick bot duels or invite-link friend matches, with chat and
             reaction storms baked in.

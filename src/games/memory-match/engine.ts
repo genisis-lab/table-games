@@ -1,6 +1,6 @@
 // src/games/memory-match/engine.ts
 //
-// Self-contained Memory Match (concentration) engine for Table Sparks.
+// Self-contained Memory Match (concentration) engine for Table Games.
 //
 // Mirrors src/games/cup-pong/engine.ts. Players alternate flipping two cards;
 // a matched pair scores a point and grants another turn, a mismatch passes the
