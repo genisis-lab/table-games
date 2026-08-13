@@ -10,6 +10,7 @@ import {
   getLegalMoves,
   isSoloGame,
   maskGameMetaForPlayer,
+  type BattleshipShip,
   type Cell,
   type GameMove,
   type GameState
@@ -23,6 +24,13 @@ function play(
   const result = applyGameMove(state, player, move);
   expect(result.ok).toBe(true);
   return result.state;
+}
+
+function setDefendingBattleshipFleet(state: GameState, ship: BattleshipShip): void {
+  const battleship = state.meta?.battleship;
+  if (!battleship) throw new Error("Expected Sea Battle metadata");
+  battleship.playerFleet = [ship];
+  battleship.playerShips = ship.cells.map((cell) => ({ ...cell }));
 }
 
 describe("Game catalog integrity", () => {
@@ -1282,6 +1290,18 @@ describe("Bot move selection", () => {
   it("extends a Sea Battle hit line instead of guessing beside the middle", () => {
     const state = createGameState("battleship");
     state.turn = "p2";
+    setDefendingBattleshipFleet(state, {
+      id: "battleship",
+      name: "Battleship",
+      size: 4,
+      orientation: "horizontal",
+      cells: [
+        { row: 4, column: 3 },
+        { row: 4, column: 4 },
+        { row: 4, column: 5 },
+        { row: 4, column: 6 }
+      ]
+    });
     state.meta!.battleship!.botShots = { "4,4": "hit", "4,5": "hit" };
 
     expect([
@@ -1293,6 +1313,17 @@ describe("Bot move selection", () => {
   it("extends the open end of a Sea Battle hit line when the other end missed", () => {
     const state = createGameState("battleship");
     state.turn = "p2";
+    setDefendingBattleshipFleet(state, {
+      id: "cruiser",
+      name: "Cruiser",
+      size: 3,
+      orientation: "horizontal",
+      cells: [
+        { row: 4, column: 4 },
+        { row: 4, column: 5 },
+        { row: 4, column: 6 }
+      ]
+    });
     state.meta!.battleship!.botShots = {
       "4,3": "miss",
       "4,4": "hit",
