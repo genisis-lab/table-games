@@ -3493,7 +3493,8 @@ jobs:
           git config user.email "289522571+genisis-lab@users.noreply.github.com"
           # The Actions token cannot modify workflow files. Publish the verified
           # product snapshot first; workflow updates are committed separately.
-          git restore --source=HEAD --worktree -- .github/workflows
+          git clean -fd -- .github/workflows
+          git restore --source=HEAD --staged --worktree -- .github/workflows
           git add -A
           git diff --cached --check
           if git diff --cached --quiet; then
