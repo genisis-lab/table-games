@@ -14,9 +14,9 @@
 //   renders the identical shot purely from the broadcast RoomSnapshot.meta. The
 //   per-snapshot seed is scrambled on every throw so it cannot be used to
 //   precompute an outcome. No protocol change needed.
-// * A throw with NO power/aim is a guaranteed make. This keeps legacy callers,
-//   bots that send a bare { column }, and the current simple board working
-//   unchanged, and keeps deterministic tests easy to write.
+// * Every throw includes power and aim. Even a perfect release has bounded
+//   server-side variance, so keyboard, pointer, touch, and modified clients all
+//   play under the same physical model.
 // * 2 balls per turn. A make keeps the turn until both balls are used; clearing
 //   the rack opens a redemption round instead of an instant win. A tied
 //   redemption sends the game to sudden-death overtime rather than a draw.
@@ -28,9 +28,9 @@ export type CupPongWinner = CupPongPlayerMark | "draw" | null;
 
 export interface CupPongMove {
 	column: number;
-	/** Throw power in [0, 1]; the sweet spot is 0.5. Omit for a guaranteed throw. */
+	/** Throw power in [0, 1]; the sweet spot is 0.5. */
 	power?: number;
-	/** Lateral aim in [-1, 1]; 0 is dead center. Omit for a guaranteed throw. */
+	/** Lateral aim in [-1, 1]; 0 is dead center. */
 	aim?: number;
 }
 
@@ -168,18 +168,14 @@ function resolveThrow(
 	// precompute an outcome from the snapshot. The shot is resolved from fresh
 	// server-side entropy and recorded on meta.lastThrow for deterministic replay.
 	meta.seed = randomSeed();
-	const hasInput = typeof move.power === "number" && typeof move.aim === "number";
-	if (!hasInput) {
-		// Guaranteed make: legacy callers and the "perfect" manual default.
-		return { made: true, power: 1, aim: 0, accuracy: 1, seed: meta.seed };
-	}
 	const power = clampRange(move.power as number, 0, 1);
 	const aim = clampRange(move.aim as number, -1, 1);
 	const powerError = Math.abs(power - 0.5) * 2; // 0 at the sweet spot, 1 at the extremes
 	const aimError = Math.abs(aim);
-	const accuracy = clampRange(1 - (powerError * 0.45 + aimError * 0.55), 0, 1);
+	const skill = clampRange(1 - (powerError * 0.45 + aimError * 0.55), 0, 1);
+	const accuracy = clampRange(0.04 + skill * 0.9, 0.04, 0.94);
 	const roll = Math.random();
-	// roll is in [0, 1): accuracy 1 always makes, accuracy 0 always misses.
+	// A perfect release is excellent, not guaranteed; a wild throw still has a tiny chance.
 	return { made: roll < accuracy, power, aim, accuracy, seed: meta.seed };
 }
 
@@ -208,6 +204,10 @@ export function applyCupPongIntent(
 	}
 	if (!meta.cups[opponent][target]) {
 		return { ok: false, reason: "That cup is already gone." };
+	}
+	if (typeof move.power !== "number" || !Number.isFinite(move.power)
+		|| typeof move.aim !== "number" || !Number.isFinite(move.aim)) {
+		return { ok: false, reason: "Choose aim and power before throwing." };
 	}
 
 	const shot = resolveThrow(meta, move);
@@ -284,7 +284,11 @@ export function getCupPongLegalMoves(meta: CupPongMeta, player: CupPongPlayerMar
 	const throwMoves = meta.cups[opponent]
 		.map((live, column) => ({ live, column }))
 		.filter((cup) => cup.live)
-		.map(({ column }) => ({ column }));
+		// Legal moves are executable representatives, not just target markers.
+		// A caller that applies the first advertised move (including generic
+		// catalog and protocol tests) must still go through the same bounded
+		// skill model as pointer, touch, keyboard, and bot throws.
+		.map(({ column }) => ({ column, power: 0.5, aim: 0 }));
 	return isCupPongReRackAvailable(meta, player) ? [{ column: CUP_PONG_RERACK_MOVE }, ...throwMoves] : throwMoves;
 }
 

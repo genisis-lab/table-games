@@ -3,7 +3,7 @@
 Table Games is a deploy-ready browser board-game platform built with React,
 TypeScript, Vite, Cloudflare Workers, and Durable Objects.
 
-V1 includes:
+The current shelf includes:
 
 - Four in a Row
 - Tic Tac Toe
@@ -12,6 +12,7 @@ V1 includes:
 - Dots and Boxes
 - Reversi
 - Checkers
+- Chess
 - Sea Battle bot mode
 - Mancala
 - Hex
@@ -21,13 +22,19 @@ V1 includes:
 - Word Hunt
 - Cup Pong
 - Dominoes
+- Order & Chaos
+- Memory Match
+- Quoridor
+- Dice Duel
+- Set Trio
 - Pipe Dash
 - 2048
+- Favorites, recent-play shortcuts, category/search filters, and Surprise Table
 - Invite links for friend rooms
 - Bot rooms with Casual, Sharp, and Ruthless modes
 - Live chat
 - Full-screen reaction bursts
-- Rematch and game switching
+- Ready/waiting lifecycle, reconnect recovery, rematch voting, and game switching
 - Board-size rule variants for Tic Tac Toe-style games and Dots and Boxes
 - Rules cards, move history, undo requests, rematch voting, and spectator seat claiming
 
@@ -46,8 +53,21 @@ rather than required environment variables.
 
 Cloudflare Durable Objects own each room. The client sends intents such as join,
 make move, chat, reaction, rematch, game switch, board variant, bot difficulty, and
-bot-start toggles. The Durable Object validates turns and moves, stores room state,
-broadcasts snapshots over WebSockets, and masks private card/tile data per viewer.
+bot-start toggles. The Durable Object validates origins, runtime message shapes,
+payload sizes, rate limits, private seat credentials, expected revisions, and
+idempotent command IDs before storing state and broadcasting snapshots over
+WebSockets. Private card/tile data is masked per viewer, while reconnect leases
+protect a temporarily disconnected seat.
+
+## Arcade ports
+
+- **Chess** uses a typed, server-authoritative engine with complete legal move
+  generation, check/checkmate, castling, en passant, four promotion choices,
+  stalemate, threefold repetition, the 50-move rule, insufficient-material draws,
+  deterministic bot play, FEN fixtures, and perft regression tests.
+- **Set Trio** uses the canonical 81-card feature deck. Three-card claims are
+  atomic in friend rooms; the first valid server arrival scores, stale revisions
+  are rejected, and invalid claims receive an authoritative penalty and cooldown.
 
 ## Dominoes
 
@@ -77,6 +97,9 @@ npm run build
 npm run types
 npm run check
 ```
+
+GitHub Actions repeats engine/UI tests, the Durable Object dual-client suite, and
+the production build on every main-branch push and pull request.
 
 ## Deployment
 

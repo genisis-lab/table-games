@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyGameMove,
   chooseBotMove,
@@ -639,7 +639,7 @@ describe("New game engines", () => {
       currentColor: "red"
     };
 
-    const next = play(state, "p1", { column: 0 });
+    const next = play(state, "p1", { column: 0, color: "green" });
 
     expect(next.turn).toBe("p1");
     expect(next.meta?.lastCard?.currentColor).toBe("green");
@@ -747,7 +747,7 @@ describe("New game engines", () => {
 
     expect(next.turn).toBe("p1");
     expect(next.meta?.lastCard?.hands.p1.at(-1)).toMatchObject({ color: "red", rank: "7" });
-    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: true });
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: true, cardId: "red-7-a" });
   });
 
   it("passes a Color Clash turn when the drawn card is still unplayable", () => {
@@ -769,7 +769,7 @@ describe("New game engines", () => {
     const next = play(state, "p1", { column: -1 });
 
     expect(next.turn).toBe("p2");
-    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: false });
+    expect(next.meta?.lastCard?.lastDraw).toEqual({ player: "p1", count: 1, playable: false, cardId: "blue-7-a" });
   });
 
   it("sows stones and updates stores in Mancala", () => {
@@ -1074,16 +1074,18 @@ describe("New table games", () => {
   });
 
   it("removes targeted cups and keeps the shooter until both Cup Pong balls are thrown", () => {
-    const state = play(createGameState("cup-pong"), "p1", { column: 0 });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const state = play(createGameState("cup-pong"), "p1", { column: 0, power: 0.5, aim: 0 });
 
     expect(state.meta?.cupPong?.cups.p2[0]).toBe(false);
     expect(state.meta?.cupPong?.made.p1).toBe(1);
     expect(state.meta?.cupPong?.ballsRemaining).toBe(1);
     expect(state.turn).toBe("p1");
 
-    const next = play(state, "p1", { column: 1 });
+    const next = play(state, "p1", { column: 1, power: 0.5, aim: 0 });
     expect(next.meta?.cupPong?.cups.p2[1]).toBe(false);
     expect(next.turn).toBe("p2");
+    random.mockRestore();
   });
 
   it("offers and applies Cup Pong re-racks only for scattered threshold racks", () => {
@@ -1168,6 +1170,46 @@ describe("New table games", () => {
     const masked = maskGameMetaForPlayer(result.state.meta, "p2");
     expect(masked?.memoryMatch?.cards[0].value).not.toBe(-1);
     expect(masked?.memoryMatch?.cards[1].value).toBe(-1);
+  });
+
+  it("keeps the Set Trio table public without revealing the future draw order", () => {
+    const state = createGameState("set-trio");
+    const originalDeck = state.meta?.setTrio?.deck;
+    const masked = maskGameMetaForPlayer(state.meta, "p1")?.setTrio;
+
+    expect(originalDeck?.length).toBeGreaterThan(0);
+    expect(masked?.board).toEqual(state.meta?.setTrio?.board);
+    expect(masked?.deck).toEqual([]);
+    expect(masked?.deckRemaining).toBe(originalDeck?.length);
+    expect(state.meta?.setTrio?.deck).toBe(originalDeck);
+  });
+
+  it("keeps a mismatched Memory pair visible until the next player acts", () => {
+    const state = createGameState("memory-match");
+    const memory = state.meta!.memoryMatch!;
+    memory.cards = [
+      { value: 0, matched: false },
+      { value: 1, matched: false },
+      { value: 0, matched: false },
+      { value: 1, matched: false }
+    ];
+    memory.columns = 2;
+    memory.pairsRemaining = 2;
+    memory.faceUp = [];
+    memory.pendingMismatch = false;
+    memory.seen = { p1: {}, p2: {}, p3: {}, p4: {} };
+
+    const first = play(state, "p1", { column: 0 });
+    const mismatch = play(first, "p1", { column: 1 });
+    expect(mismatch.turn).toBe("p2");
+    expect(mismatch.meta?.memoryMatch?.faceUp).toEqual([0, 1]);
+    expect(mismatch.meta?.memoryMatch?.pendingMismatch).toBe(true);
+    const visible = maskGameMetaForPlayer(mismatch.meta, "p2");
+    expect(visible?.memoryMatch?.cards.slice(0, 2).map((card) => card.value)).toEqual([0, 1]);
+
+    const next = play(mismatch, "p2", { column: 2 });
+    expect(next.meta?.memoryMatch?.faceUp).toEqual([2]);
+    expect(next.meta?.memoryMatch?.pendingMismatch).toBe(false);
   });
 
   it("moves a Quoridor pawn toward the goal", () => {

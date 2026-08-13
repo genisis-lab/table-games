@@ -42,9 +42,8 @@ export function estimateOpponentWeakness(meta: DominoMeta, player: DominoPlayerM
   );
   return opponents.reduce((score, opponent) => {
     const passedPenalty = meta.passedNumbers[opponent]?.includes(pip) ? 28 : 0;
-    const visibleHandRisk = meta.hands[opponent]?.filter((tile) => hasPip(tile, pip)).length * -7;
     const lowHandPressure = meta.handCounts[opponent] <= 2 ? passedPenalty * 1.35 : passedPenalty;
-    return score + lowHandPressure + visibleHandRisk;
+    return score + lowHandPressure;
   }, 0);
 }
 
@@ -54,7 +53,7 @@ function mediumDominoScore(meta: DominoMeta, player: DominoPlayerMark, move: Dom
     hasPip(tile, move.resultingEnds[0]) || hasPip(tile, move.resultingEnds[1])
   ).length;
   const nextPlayer = nextPlayerAfter(meta, player);
-  const blocksNext = move.resultingEnds.every((pip) => !meta.hands[nextPlayer].some((tile) => hasPip(tile, pip)));
+  const blocksNext = move.resultingEnds.some((pip) => meta.passedNumbers[nextPlayer]?.includes(pip));
   return (
     tilePips(move.tile) * 8 +
     (move.tile.left === move.tile.right ? 22 : 0) +
@@ -72,16 +71,16 @@ function hardDominoScore(meta: DominoMeta, player: DominoPlayerMark, move: Domin
   const nextPlayer = nextPlayerAfter(meta, player);
   const partner = partnerFor(player);
   const ownFollowCount = remainingHand.filter((tile) => hasPip(tile, leftEnd) || hasPip(tile, rightEnd)).length;
-  const partnerFollowCount = meta.gameMode === "partnership"
-    ? meta.hands[partner].filter((tile) => hasPip(tile, leftEnd) || hasPip(tile, rightEnd)).length
+  const partnerSupport = meta.gameMode === "partnership"
+    ? [leftEnd, rightEnd].filter((pip) => !meta.passedNumbers[partner]?.includes(pip)).length
     : 0;
-  const nextPlayerCanPlay = meta.hands[nextPlayer].some((tile) => hasPip(tile, leftEnd) || hasPip(tile, rightEnd));
+  const nextPlayerLikelyBlocked = [leftEnd, rightEnd].some((pip) => meta.passedNumbers[nextPlayer]?.includes(pip));
   const nextPlayerDanger = meta.handCounts[nextPlayer] <= 2 ? 95 : meta.handCounts[nextPlayer] <= 3 ? 42 : 0;
   const weaknessScore =
     estimateOpponentWeakness(meta, player, leftEnd) +
     estimateOpponentWeakness(meta, player, rightEnd);
   const handShapeScore = pipDiversityScore(remainingHand, leftEnd, rightEnd);
-  const teamScore = meta.gameMode === "partnership" ? partnerFollowCount * 18 : 0;
+  const teamScore = meta.gameMode === "partnership" ? partnerSupport * 9 : 0;
 
   return (
     tilePips(move.tile) * 10 +
@@ -90,7 +89,7 @@ function hardDominoScore(meta: DominoMeta, player: DominoPlayerMark, move: Domin
     handShapeScore +
     teamScore +
     weaknessScore +
-    (nextPlayerCanPlay ? -nextPlayerDanger : nextPlayerDanger) -
+    (nextPlayerLikelyBlocked ? nextPlayerDanger : -nextPlayerDanger * 0.2) -
     remainingHand.length * 4
   );
 }

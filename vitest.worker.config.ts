@@ -8,6 +8,9 @@ export default defineConfig({
     })
   ],
   test: {
-    include: ["worker/**/*.test.ts"]
+    include: ["worker/**/*.test.ts"],
+    // Cloudflare's pool requires shared storage for Durable Object WebSocket tests.
+    isolate: false,
+    maxWorkers: 1
   }
 });
