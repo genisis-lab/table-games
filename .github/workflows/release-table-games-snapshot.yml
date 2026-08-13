@@ -3534,6 +3534,19 @@ jobs:
           TABLE_GAMES_RELEASE_PAYLOAD
           tar -xzf "$RUNNER_TEMP/table-games-release-overlay.tar.gz" -C .
           find . -name '._*' -type f -delete
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const path = "vitest.worker.config.ts";
+          const source = readFileSync(path, "utf8");
+          const before = '    include: ["worker/**/*.test.ts"]';
+          const after = `    include: ["worker/**/*.test.ts"],
+              // Cloudflare's pool requires shared storage for Durable Object WebSocket tests.
+              isolate: false,
+              maxWorkers: 1`;
+          if (!source.includes(before)) throw new Error("Worker test config changed unexpectedly.");
+          writeFileSync(path, source.replace(before, after));
+          NODE
           rm .github/workflows/release-table-games-snapshot.yml
       - uses: actions/setup-node@v5
         with:
