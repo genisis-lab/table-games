@@ -3533,6 +3533,7 @@ jobs:
           DwA=
           TABLE_GAMES_RELEASE_PAYLOAD
           tar -xzf "$RUNNER_TEMP/table-games-release-overlay.tar.gz" -C .
+          find . -name '._*' -type f -delete
           rm .github/workflows/release-table-games-snapshot.yml
       - uses: actions/setup-node@v5
         with:
