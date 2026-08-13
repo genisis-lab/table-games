@@ -1,7 +1,6 @@
 import { SELF, reset } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import worker from "./index";
-import type { Env } from "./game-room";
 
 type ServerMessage = {
   type: string;
@@ -45,14 +44,14 @@ type ServerMessage = {
         scores: { p1: number; p2: number; p3: number; p4: number };
       };
     };
-    chat: Array<{ body: string }>;
+    chat: Array<{ body: string; guestToken?: string }>;
     moveHistory: Array<{ player: string; label: string }>;
     rematchRequests: string[];
     undoRequests: string[];
   };
   move?: { player: string; row: number; column: number };
-  chat?: { body: string };
-  reaction?: { emoji: string };
+  chat?: { body: string; guestToken?: string };
+  reaction?: { emoji: string; guestToken?: string };
 };
 
 afterEach(async () => {
@@ -60,6 +59,24 @@ afterEach(async () => {
 });
 
 describe("GameRoom Durable Object", () => {
+  it("uses exact CORS and security headers on API responses", async () => {
+    const allowed = await SELF.fetch("https://table-sparks.test/api/health", {
+      headers: { origin: "https://table.builtwai.com" }
+    });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://table.builtwai.com");
+    expect(allowed.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const denied = await SELF.fetch("https://table-sparks.test/api/health", {
+      headers: { origin: "https://evil.example" }
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+
+    const invalidRoom = await SELF.fetch("https://table-sparks.test/api/rooms/not-a-room");
+    expect(invalidRoom.status).toBe(404);
+    expect(invalidRoom.headers.get("content-type")).toContain("application/json");
+  });
+
   it("serves static assets for non-API room routes", async () => {
     const response = await worker.fetch(
       new Request("https://table-sparks.test/room/room-direct-link"),
@@ -67,7 +84,7 @@ describe("GameRoom Durable Object", () => {
         ASSETS: {
           fetch: async (request: Request) => new Response(`asset:${new URL(request.url).pathname}`)
         }
-      } as unknown as Env
+      } as Env
     );
 
     expect(response.status).toBe(200);
@@ -95,6 +112,29 @@ describe("GameRoom Durable Object", () => {
     expect(json.invitePath).toBe(`/room/${json.roomId}`);
   });
 
+  it("rejects malformed messages and missing guest capabilities", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const socket = await openRoomSocket(roomId);
+    socket.send("null");
+    expect((await waitForType(socket, "error")).reason).toBe("Invalid message.");
+    socket.send(JSON.stringify({ type: "join", name: "No Token" }));
+    expect((await waitForType(socket, "error")).reason).toBe("Missing guest token.");
+  });
+
+  it("rejects oversized room-creation bodies before parsing", async () => {
+    const response = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", padding: "x".repeat(9 * 1024) }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(response.status).toBe(413);
+  });
+
   it("coordinates seats, moves, chat, reactions, and snapshots over WebSockets", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
@@ -113,6 +153,8 @@ describe("GameRoom Durable Object", () => {
     yellow.send(JSON.stringify({ type: "join", guestToken: "token-yellow", name: "Sunny" }));
     const yellowSnapshot = await waitForType(yellow, "room_snapshot");
     expect(yellowSnapshot.room?.players).toHaveLength(2);
+    expect(yellowSnapshot.room?.players.find((player) => player.name === "Sunny")?.guestToken).toBe("token-yellow");
+    expect(JSON.stringify(yellowSnapshot)).not.toContain("token-red");
 
     red.send(JSON.stringify({ type: "make_move", move: { column: 0 } }));
     const moveMessage = await waitForType(yellow, "move_applied");
@@ -121,15 +163,19 @@ describe("GameRoom Durable Object", () => {
     yellow.send(JSON.stringify({ type: "send_chat", body: "that drop was loud" }));
     const chatMessage = await waitForType(red, "chat_added");
     expect(chatMessage.chat?.body).toBe("that drop was loud");
+    expect(chatMessage.chat?.guestToken).not.toBe("token-yellow");
 
     red.send(JSON.stringify({ type: "send_reaction", emoji: "😂" }));
     const reactionMessage = await waitForType(yellow, "reaction_added");
     expect(reactionMessage.reaction?.emoji).toBe("😂");
+    expect(reactionMessage.reaction?.guestToken).not.toBe("token-red");
 
     const snapshotResponse = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}`);
     const snapshot = (await snapshotResponse.json()) as ServerMessage["room"];
     expect(snapshot?.board[5][0]).toBe("p1");
     expect(snapshot?.chat.at(-1)?.body).toBe("that drop was loud");
+    expect(JSON.stringify(snapshot)).not.toContain("token-red");
+    expect(JSON.stringify(snapshot)).not.toContain("token-yellow");
   });
 
   it("seats a bot opponent and answers after the human move", async () => {
@@ -441,7 +487,8 @@ describe("GameRoom Durable Object", () => {
 
     x.send(JSON.stringify({ type: "request_undo" }));
     const requested = await waitForType(o, "room_snapshot");
-    expect(requested.room?.undoRequests).toEqual(["token-x"]);
+    expect(requested.room?.undoRequests).toHaveLength(1);
+    expect(requested.room?.undoRequests).not.toContain("token-x");
     expect(requested.room?.board[0][0]).toBe("p1");
 
     o.send(JSON.stringify({ type: "request_undo" }));
@@ -521,7 +568,8 @@ describe("GameRoom Durable Object", () => {
     await waitForType(o, "move_applied");
     x.send(JSON.stringify({ type: "request_rematch" }));
     const waiting = await waitForType(o, "room_snapshot");
-    expect(waiting.room?.rematchRequests).toEqual(["token-x"]);
+    expect(waiting.room?.rematchRequests).toHaveLength(1);
+    expect(waiting.room?.rematchRequests).not.toContain("token-x");
     expect(waiting.room?.board[0][0]).toBe("p1");
 
     o.send(JSON.stringify({ type: "request_rematch" }));
@@ -624,7 +672,7 @@ async function createAndJoinRoom(
 
 async function openRoomSocket(roomId: string): Promise<WebSocket> {
   const response = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}/socket`, {
-    headers: { upgrade: "websocket" }
+    headers: { upgrade: "websocket", origin: "https://table-sparks.test" }
   });
 
   expect(response.status).toBe(101);

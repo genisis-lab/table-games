@@ -10,5 +10,4 @@ coverage
 outputs
 playwright-report
 test-results
-worker-configuration.d.ts
 *.tsbuildinfo

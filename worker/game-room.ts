@@ -33,12 +33,8 @@ import type {
   ServerMessage
 } from "../src/shared/protocol";
 
-export interface Env {
-  ROOMS: DurableObjectNamespace<GameRoom>;
-  ASSETS?: {
-    fetch(request: Request): Promise<Response>;
-  };
-}
+type StoredRoomPlayer = RoomPlayer & { publicId?: string };
+type StoredRoomSpectator = RoomSpectator & { publicId?: string };
 
 interface StoredRoom {
   roomId: string;
@@ -47,8 +43,8 @@ interface StoredRoom {
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
   botStarts: boolean;
-  players: RoomPlayer[];
-  spectators: RoomSpectator[];
+  players: StoredRoomPlayer[];
+  spectators: StoredRoomSpectator[];
   game: ReturnType<typeof createGameState>;
   gameHistory: GameState[];
   moveHistory: MoveRecord[];
@@ -63,12 +59,20 @@ interface StoredRoom {
 interface SocketAttachment {
   roomId?: string;
   guestToken?: string;
+  messageTimes?: number[];
+  chatTimes?: number[];
+  reactionTimes?: number[];
 }
 
 const ROOM_KEY = "room";
 const ROOM_INACTIVITY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CHAT_MESSAGES = 80;
 const MAX_REACTIONS = 80;
+const MAX_SOCKET_MESSAGE_BYTES = 16 * 1024;
+const MESSAGE_RATE_LIMIT = 60;
+const MESSAGE_RATE_WINDOW_MS = 10_000;
+const CHAT_RATE_LIMIT = 8;
+const REACTION_RATE_LIMIT = 12;
 const BOT_NAME = "Spark Bot";
 const BOT_MOVE_DELAY_MS = 520;
 const RUTHLESS_FOUR_BOT_DELAY_MS = 20;
@@ -94,7 +98,16 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (action === "init" && request.method === "POST") {
-      const body = (await request.json().catch(() => ({}))) as {
+      let parsedBody: unknown;
+      try {
+        parsedBody = await readJsonBody(request, 8 * 1024);
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof PayloadTooLargeError ? "Request body is too large." : "Invalid request body." },
+          { status: error instanceof PayloadTooLargeError ? 413 : 400 }
+        );
+      }
+      const body = (parsedBody && typeof parsedBody === "object" ? parsedBody : {}) as {
         gameId?: string;
         opponent?: string;
         botDifficulty?: string;
@@ -136,7 +149,12 @@ export class GameRoom extends DurableObject<Env> {
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
-      server.serializeAttachment({ roomId } satisfies SocketAttachment);
+      server.serializeAttachment({
+        roomId,
+        messageTimes: [],
+        chatTimes: [],
+        reactionTimes: []
+      } satisfies SocketAttachment);
       this.ctx.acceptWebSocket(server);
 
       return new Response(null, { status: 101, webSocket: client });
@@ -150,6 +168,16 @@ export class GameRoom extends DurableObject<Env> {
       this.send(ws, { type: "error", reason: "Unsupported message." });
       return;
     }
+    if (new TextEncoder().encode(message).byteLength > MAX_SOCKET_MESSAGE_BYTES) {
+      this.send(ws, { type: "error", reason: "Message is too large." });
+      return;
+    }
+
+    const attachment = (ws.deserializeAttachment() ?? {}) as SocketAttachment;
+    if (!this.takeSocketRate(ws, attachment, "messageTimes", MESSAGE_RATE_LIMIT)) {
+      this.send(ws, { type: "error", reason: "Too many messages. Slow down." });
+      return;
+    }
 
     let clientMessage: ClientMessage;
     try {
@@ -158,8 +186,26 @@ export class GameRoom extends DurableObject<Env> {
       this.send(ws, { type: "error", reason: "Invalid message." });
       return;
     }
+    if (!clientMessage || typeof clientMessage !== "object" || typeof clientMessage.type !== "string") {
+      this.send(ws, { type: "error", reason: "Invalid message." });
+      return;
+    }
 
-    const attachment = (ws.deserializeAttachment() ?? {}) as SocketAttachment;
+    if (
+      clientMessage.type === "send_chat" &&
+      !this.takeSocketRate(ws, attachment, "chatTimes", CHAT_RATE_LIMIT)
+    ) {
+      this.send(ws, { type: "error", reason: "Chat rate limit reached." });
+      return;
+    }
+    if (
+      clientMessage.type === "send_reaction" &&
+      !this.takeSocketRate(ws, attachment, "reactionTimes", REACTION_RATE_LIMIT)
+    ) {
+      this.send(ws, { type: "error", reason: "Reaction rate limit reached." });
+      return;
+    }
+
     const roomId = this.getRoomIdFromSocketUrl(ws);
     const room = await this.loadRoom(roomId);
     await this.finalizeRoomIfNeeded(room);
@@ -265,7 +311,7 @@ export class GameRoom extends DurableObject<Env> {
     rawName: string
   ): Promise<void> {
     const name = cleanName(rawName);
-    if (!guestToken || guestToken.length > 100) {
+    if (typeof guestToken !== "string" || !/^[A-Za-z0-9_-]{6,100}$/.test(guestToken)) {
       this.send(ws, { type: "error", reason: "Missing guest token." });
       return;
     }
@@ -289,6 +335,7 @@ export class GameRoom extends DurableObject<Env> {
     } else if (availablePlayerMark(room)) {
       room.players.push({
         guestToken,
+        publicId: createPublicId(),
         name,
         mark: availablePlayerMark(room)!,
         connected: true,
@@ -298,6 +345,7 @@ export class GameRoom extends DurableObject<Env> {
     } else {
       room.spectators.push({
         guestToken,
+        publicId: createPublicId(),
         name,
         connected: true,
         joinedAt: Date.now()
@@ -384,7 +432,11 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    this.broadcastRoom(room, (snapshot) => ({ type: "chat_added", room: snapshot, chat }));
+    this.broadcastRoom(room, (snapshot) => ({
+      type: "chat_added",
+      room: snapshot,
+      chat: snapshot.chat.find((item) => item.id === chat.id) ?? snapshot.chat.at(-1)!
+    }));
   }
 
   private async handleReaction(
@@ -416,7 +468,11 @@ export class GameRoom extends DurableObject<Env> {
     room.updatedAt = Date.now();
     await this.saveRoom(room);
 
-    this.broadcastRoom(room, (snapshot) => ({ type: "reaction_added", room: snapshot, reaction }));
+    this.broadcastRoom(room, (snapshot) => ({
+      type: "reaction_added",
+      room: snapshot,
+      reaction: snapshot.reactionEvents.find((item) => item.id === reaction.id) ?? snapshot.reactionEvents.at(-1)!
+    }));
   }
 
   private async handleRematch(
@@ -505,6 +561,7 @@ export class GameRoom extends DurableObject<Env> {
     room.players = room.players.filter((player) => player.mark !== mark);
     room.players.push({
       guestToken: spectator.guestToken,
+      publicId: spectator.publicId ?? createPublicId(),
       name: spectator.name,
       mark,
       connected: true,
@@ -767,7 +824,11 @@ export class GameRoom extends DurableObject<Env> {
 
     const stored = await this.ctx.storage.get<StoredRoom>(ROOM_KEY);
     if (stored) {
+      const needsPublicIds = [...stored.players, ...stored.spectators].some(
+        (participant) => !participant.publicId
+      );
       this.room = this.ensureRoomShape(stored, roomId);
+      if (needsPublicIds) await this.ctx.storage.put(ROOM_KEY, this.room);
       if ((await this.ctx.storage.getAlarm()) === null) {
         await this.ctx.storage.setAlarm(this.room.updatedAt + ROOM_INACTIVITY_TTL_MS);
       }
@@ -830,22 +891,70 @@ export class GameRoom extends DurableObject<Env> {
       opponent: room.opponent,
       botDifficulty: room.botDifficulty,
       botStarts: room.botStarts,
-      players: [...room.players].sort((a, b) => a.mark.localeCompare(b.mark)),
-      spectators: room.spectators,
+      players: [...room.players]
+        .sort((a, b) => a.mark.localeCompare(b.mark))
+        .map((player) => ({
+          guestToken: this.publicGuestToken(room, player.guestToken, guestToken),
+          name: player.name,
+          mark: player.mark,
+          connected: player.connected,
+          joinedAt: player.joinedAt,
+          ...(player.isBot ? { isBot: true } : {})
+        })),
+      spectators: room.spectators.map((spectator) => ({
+        guestToken: this.publicGuestToken(room, spectator.guestToken, guestToken),
+        name: spectator.name,
+        connected: spectator.connected,
+        joinedAt: spectator.joinedAt
+      })),
       board: room.game.board,
       turn: room.game.turn,
       winner: room.game.winner,
       winningLine: room.game.winningLine,
       moveCount: room.game.moveCount,
       meta: maskGameMetaForPlayer(room.game.meta, viewerMark),
-      chat: room.chat,
-      reactionEvents: room.reactionEvents,
+      chat: room.chat.map((chat) => ({
+        ...chat,
+        guestToken: this.publicGuestToken(room, chat.guestToken, guestToken)
+      })),
+      reactionEvents: room.reactionEvents.map((reaction) => ({
+        ...reaction,
+        guestToken: this.publicGuestToken(room, reaction.guestToken, guestToken)
+      })),
       moveHistory: room.moveHistory,
-      rematchRequests: room.rematchRequests,
-      undoRequests: room.undoRequests,
+      rematchRequests: room.rematchRequests.map((token) => this.publicGuestToken(room, token, guestToken)),
+      undoRequests: room.undoRequests.map((token) => this.publicGuestToken(room, token, guestToken)),
       createdAt: room.createdAt,
       updatedAt: room.updatedAt
     };
+  }
+
+  private publicGuestToken(room: StoredRoom, token: string, viewerToken?: string): string {
+    if (viewerToken && token === viewerToken) return token;
+    const participant = room.players.find((player) => player.guestToken === token)
+      ?? room.spectators.find((spectator) => spectator.guestToken === token);
+    if (!participant) return "member-removed";
+    participant.publicId ??= createPublicId();
+    return participant.publicId;
+  }
+
+  private takeSocketRate(
+    ws: WebSocket,
+    attachment: SocketAttachment,
+    key: "messageTimes" | "chatTimes" | "reactionTimes",
+    limit: number
+  ): boolean {
+    const now = Date.now();
+    const times = (attachment[key] ?? []).filter((value) => now - value < MESSAGE_RATE_WINDOW_MS);
+    if (times.length >= limit) {
+      attachment[key] = times;
+      ws.serializeAttachment(attachment);
+      return false;
+    }
+    times.push(now);
+    attachment[key] = times;
+    ws.serializeAttachment(attachment);
+    return true;
   }
 
   private sendRoom(
@@ -881,6 +990,9 @@ export class GameRoom extends DurableObject<Env> {
     room.moveHistory ??= [];
     room.rematchRequests ??= [];
     room.undoRequests ??= [];
+    for (const participant of [...room.players, ...room.spectators]) {
+      participant.publicId ??= createPublicId();
+    }
 
     if (isSoloGame(room.gameId)) {
       prepareSoloPlayers(room);
@@ -933,16 +1045,17 @@ function cleanName(value: string): string {
   return trimmed || "Guest";
 }
 
-function createBotPlayers(roomId: string, joinedAt: number, gameId: GameId): RoomPlayer[] {
+function createBotPlayers(roomId: string, joinedAt: number, gameId: GameId): StoredRoomPlayer[] {
   const maxPlayers = maxPlayersForGame(gameId);
   return Array.from({ length: Math.max(1, maxPlayers - 1) }, (_, index) =>
     createBotPlayer(roomId, joinedAt, `p${index + 2}` as PlayerMark)
   );
 }
 
-function createBotPlayer(roomId: string, joinedAt: number, mark: PlayerMark = "p2"): RoomPlayer {
+function createBotPlayer(roomId: string, joinedAt: number, mark: PlayerMark = "p2"): StoredRoomPlayer {
   return {
     guestToken: `bot:${roomId}:${mark}`,
+    publicId: createPublicId(),
     name: mark === "p2" ? BOT_NAME : `${BOT_NAME} ${mark.slice(1)}`,
     mark,
     connected: true,
@@ -1099,7 +1212,7 @@ function ensureBotPlayers(room: StoredRoom): void {
 
 function trimPlayersForGame(room: StoredRoom): void {
   const allowed = new Set(playerMarksForGame(room.gameId));
-  const keep: RoomPlayer[] = [];
+  const keep: StoredRoomPlayer[] = [];
   for (const player of room.players) {
     if (allowed.has(player.mark)) keep.push(player);
     else if (!player.isBot) room.spectators.push(toSpectator(player));
@@ -1111,14 +1224,43 @@ function playerMarksForGame(gameId: GameId): PlayerMark[] {
   return (["p1", "p2", "p3", "p4"] as PlayerMark[]).slice(0, maxPlayersForGame(gameId));
 }
 
-function toSpectator(player: RoomPlayer): RoomSpectator {
+function toSpectator(player: StoredRoomPlayer): StoredRoomSpectator {
   return {
     guestToken: player.guestToken,
+    publicId: player.publicId ?? createPublicId(),
     name: player.name,
     connected: player.connected,
     joinedAt: player.joinedAt
   };
 }
+
+function createPublicId(): string {
+  return `member-${crypto.randomUUID()}`;
+}
+
+async function readJsonBody(request: Request, limit: number): Promise<unknown> {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > limit) throw new PayloadTooLargeError();
+  if (!request.body) return {};
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let raw = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      try { await reader.cancel(); } catch {}
+      throw new PayloadTooLargeError();
+    }
+    raw += decoder.decode(value, { stream: true });
+  }
+  raw += decoder.decode();
+  return JSON.parse(raw || "{}");
+}
+
+class PayloadTooLargeError extends Error {}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
