@@ -2,14 +2,14 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "table-sparks",
   "main": "worker/index.ts",
-  "compatibility_date": "2026-05-31",
+  "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application"
   },
   "vars": {
-    "ALLOWED_ORIGINS": "https://table.builtwai.com,https://table-sparks-game.pages.dev"
+    "ALLOWED_ORIGINS": "https://table.builtwai.com,https://table-sparks-game.pages.dev,https://*.table-sparks-game.pages.dev"
   },
   "routes": [
     {
