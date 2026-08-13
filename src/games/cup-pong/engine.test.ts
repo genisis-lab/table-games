@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	CUP_PONG_BALLS_PER_TURN,
@@ -15,10 +15,18 @@ function freshMeta(): CupPongMeta {
 	return createCupPongMeta("classic");
 }
 
+beforeEach(() => {
+	vi.spyOn(Math, "random").mockReturnValue(0.5);
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 describe("Cup Pong engine", () => {
 	it("removes a targeted cup and keeps the turn until both balls are used", () => {
 		const meta = freshMeta();
-		const first = applyCupPongIntent(meta, "p1", { column: 0 });
+		const first = applyCupPongIntent(meta, "p1", { column: 0, power: 0.5, aim: 0 });
 		expect(first.ok).toBe(true);
 		if (!first.ok) return;
 		expect(first.meta.cups.p2[0]).toBe(false);
@@ -27,7 +35,7 @@ describe("Cup Pong engine", () => {
 		expect(first.nextTurn).toBe("p1");
 		expect(first.winner).toBeNull();
 
-		const second = applyCupPongIntent(first.meta, "p1", { column: 1 });
+		const second = applyCupPongIntent(first.meta, "p1", { column: 1, power: 0.5, aim: 0 });
 		expect(second.ok).toBe(true);
 		if (!second.ok) return;
 		expect(second.nextTurn).toBe("p2");
@@ -36,7 +44,7 @@ describe("Cup Pong engine", () => {
 
 	it("misses on a wildly off throw and resets the shooter streak", () => {
 		const meta = freshMeta();
-		const made = applyCupPongIntent(meta, "p1", { column: 0 });
+		const made = applyCupPongIntent(meta, "p1", { column: 0, power: 0.5, aim: 0 });
 		expect(made.ok).toBe(true);
 		if (!made.ok) return;
 		expect(made.meta.streak.p1).toBe(1);
@@ -51,20 +59,21 @@ describe("Cup Pong engine", () => {
 		expect(missed.nextTurn).toBe("p2");
 	});
 
-	it("makes a perfectly aimed power/aim throw", () => {
+	it("gives a perfectly aimed power/aim throw high but bounded odds", () => {
 		const meta = freshMeta();
-		// power 0.5 (sweet spot) + aim 0 => accuracy 1 => guaranteed make.
+		// The mocked server roll falls below the capped 94% make chance.
 		const result = applyCupPongIntent(meta, "p1", { column: 0, power: 0.5, aim: 0 });
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.meta.cups.p2[0]).toBe(false);
 		expect(result.meta.lastThrow?.made).toBe(true);
+		expect(result.meta.lastThrow?.accuracy).toBe(0.94);
 	});
 
 	it("opens a redemption round when the rack is cleared instead of an instant win", () => {
 		const meta = freshMeta();
 		meta.cups.p2 = [true, false, false, false, false, false];
-		const result = applyCupPongIntent(meta, "p1", { column: 0 });
+		const result = applyCupPongIntent(meta, "p1", { column: 0, power: 0.5, aim: 0 });
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.winner).toBeNull();
@@ -79,7 +88,7 @@ describe("Cup Pong engine", () => {
 		meta.redemption = { active: true, player: "p2" };
 		meta.cups.p1 = [true, false, false, false, false, false];
 		meta.ballsRemaining = 1;
-		const result = applyCupPongIntent(meta, "p2", { column: 0 });
+		const result = applyCupPongIntent(meta, "p2", { column: 0, power: 0.5, aim: 0 });
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.winner).toBeNull();
@@ -96,7 +105,7 @@ describe("Cup Pong engine", () => {
 		meta.cups.p1 = [true, true, true];
 		meta.cups.p2 = [true, false, false];
 		meta.ballsRemaining = CUP_PONG_BALLS_PER_TURN;
-		const result = applyCupPongIntent(meta, "p1", { column: 0 });
+		const result = applyCupPongIntent(meta, "p1", { column: 0, power: 0.5, aim: 0 });
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.winner).toBe("p1");
@@ -141,7 +150,13 @@ describe("Cup Pong engine", () => {
 	it("lists only the standing opponent cups as legal targets", () => {
 		const meta = freshMeta();
 		meta.cups.p2 = [true, false, true, true, true, true]; // 5 live, so no re-rack move.
-		expect(getCupPongLegalMoves(meta, "p1")).toEqual([{ column: 0 }, { column: 2 }, { column: 3 }, { column: 4 }, { column: 5 }]);
+		expect(getCupPongLegalMoves(meta, "p1")).toEqual([
+			{ column: 0, power: 0.5, aim: 0 },
+			{ column: 2, power: 0.5, aim: 0 },
+			{ column: 3, power: 0.5, aim: 0 },
+			{ column: 4, power: 0.5, aim: 0 },
+			{ column: 5, power: 0.5, aim: 0 },
+		]);
 	});
 
 	it("aims a ruthless bot at the center cup with tight power and aim", () => {

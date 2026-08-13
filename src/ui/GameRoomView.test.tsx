@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Cell } from "../shared/games";
 import type { AppliedMove } from "../shared/protocol";
 import type { RoomSnapshot } from "../shared/protocol";
+import { createChessMeta, createChessMetaFromFen } from "../games/chess/engine";
+import { createSetTrioMeta } from "../games/set-trio/engine";
 import { advanceSnakeRun, createFlappyRun, createSnakeRun, GameRoomView, queueSnakeTurn, resolveDartThrow } from "./GameRoomView";
 
 const room: RoomSnapshot = {
@@ -374,12 +376,247 @@ describe("GameRoomView", () => {
     expect(onMove).not.toHaveBeenCalled();
   });
 
-  it("shows reconnecting as a quiet status chip", () => {
+  it("shows reconnecting and locks network-backed interactions until the socket recovers", () => {
+    const onMove = vi.fn();
+    const onChat = vi.fn();
+    const onReaction = vi.fn();
     render(
       <GameRoomView
         room={room}
         guestToken="red-token"
         connectionStatus="reconnecting"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={onChat}
+        onReaction={onReaction}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Reconnecting...")).toHaveClass("connection-reconnecting");
+    const boardMove = screen.getByRole("button", { name: /column 1/i });
+    expect(boardMove).toBeDisabled();
+    fireEvent.click(boardMove);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send chat" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "React with 😂" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /switch to: chess/i })).toBeDisabled();
+  });
+
+  it("locks simultaneous Word Hunt input while reconnecting", () => {
+    const onMove = vi.fn();
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "word-hunt",
+          board: [[null]],
+          meta: {
+            wordHunt: {
+              size: 2,
+              letters: [["C", "A"], ["T", "S"]],
+              words: ["CAT"],
+              found: { p1: [], p2: [], p3: [], p4: [] },
+              scores: { p1: 0, p2: 0, p3: 0, p4: 0 },
+              seed: "reconnect-test",
+              roundStartedAt: Date.now(),
+              durationMs: 60_000
+            }
+          }
+        }}
+        guestToken="red-token"
+        connectionStatus="reconnecting"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Letter C at 1, 1" })).toBeDisabled();
+    expect(screen.getByLabelText("Word")).toBeDisabled();
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("plays a legal Chess move and exposes the complete promotion choice", () => {
+    const onMove = vi.fn();
+    const chessRoom: RoomSnapshot = {
+      ...room,
+      gameId: "chess",
+      board: [[null]],
+      meta: { chess: createChessMeta("classic") }
+    };
+    const view = render(
+      <GameRoomView
+        room={chessRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^e2 white pawn$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /e4 empty, legal destination/i }));
+    expect(onMove).toHaveBeenCalledWith({ row: 6, column: 4, toRow: 4, toColumn: 4 });
+
+    const promotionRoom: RoomSnapshot = {
+      ...chessRoom,
+      meta: { chess: createChessMetaFromFen("7k/P7/8/8/8/8/8/7K w - - 0 1") }
+    };
+    view.rerender(
+      <GameRoomView
+        room={promotionRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^a7 white pawn$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /a8 empty, legal destination/i }));
+    expect(screen.getByRole("group", { name: "Choose promotion piece" })).toBeInTheDocument();
+    view.rerender(
+      <GameRoomView
+        room={promotionRoom}
+        guestToken="red-token"
+        connectionStatus="reconnecting"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: /Knight/i })).toBeDisabled();
+    view.rerender(
+      <GameRoomView
+        room={promotionRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Knight/i }));
+    expect(onMove).toHaveBeenLastCalledWith({ row: 1, column: 0, toRow: 0, toColumn: 0, promotion: "n" });
+  });
+
+  it("lets either Set Trio player submit an atomic three-card claim", () => {
+    const onMove = vi.fn();
+    const setMeta = createSetTrioMeta("classic", 0x12345678);
+    render(
+      <GameRoomView
+        room={{
+          ...room,
+          gameId: "set-trio",
+          board: [[null]],
+          turn: "p1",
+          meta: { setTrio: setMeta }
+        }}
+        guestToken="yellow-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={onMove}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Pattern race live")).toBeInTheDocument();
+    const cards = within(screen.getByLabelText("Set Trio cards")).getAllByRole("button");
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1]);
+    fireEvent.click(cards[2]);
+    fireEvent.click(screen.getByRole("button", { name: "Claim 3/3" }));
+
+    expect(onMove).toHaveBeenCalledWith({
+      column: 0,
+      indices: [0, 1, 2],
+      cardIds: [setMeta.board[0].id, setMeta.board[1].id, setMeta.board[2].id]
+    });
+  });
+
+  it("shows Set Trio cooldowns and never labels a spectator score as their own", () => {
+    const setMeta = createSetTrioMeta("classic", 0x87654321);
+    setMeta.cooldowns.p1 = {
+      durationMs: 1500,
+      issuedAtRevision: setMeta.revision,
+      expiresAt: Date.now() + 1500,
+      reason: "invalid-set"
+    };
+    const setRoom: RoomSnapshot = {
+      ...room,
+      gameId: "set-trio",
+      board: [[null]],
+      meta: { setTrio: setMeta }
+    };
+    const view = render(
+      <GameRoomView
+        room={setRoom}
+        guestToken="red-token"
+        connectionStatus="connected"
         inviteUrl="https://table-sparks.test/room/room-test"
         copiedInvite={false}
         onCopyInvite={vi.fn()}
@@ -394,8 +631,33 @@ describe("GameRoomView", () => {
         onSetBotDifficulty={vi.fn()}
       />
     );
+    expect(screen.getByText(/wrong trio cooldown/i)).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Set Trio cards")).getAllByRole("button").every((button) => button.hasAttribute("disabled"))).toBe(true);
 
-    expect(screen.getByText("Reconnecting...")).toHaveClass("connection-reconnecting");
+    view.rerender(
+      <GameRoomView
+        room={{
+          ...setRoom,
+          players: room.players,
+          spectators: [{ guestToken: "watch-token", name: "Wally", connected: true, joinedAt: 4 }]
+        }}
+        guestToken="watch-token"
+        connectionStatus="connected"
+        inviteUrl="https://table-sparks.test/room/room-test"
+        copiedInvite={false}
+        onCopyInvite={vi.fn()}
+        onMove={vi.fn()}
+        onChat={vi.fn()}
+        onReaction={vi.fn()}
+        onRematch={vi.fn()}
+        onRequestUndo={vi.fn()}
+        onClaimSeat={vi.fn()}
+        onSwitchGame={vi.fn()}
+        onSetBoardVariant={vi.fn()}
+        onSetBotDifficulty={vi.fn()}
+      />
+    );
+    expect(screen.queryByText("Your score")).not.toBeInTheDocument();
   });
 
   it("shows when a friend opponent is briefly reconnecting", () => {
@@ -529,7 +791,7 @@ describe("GameRoomView", () => {
     fireEvent.click(wideButton);
     expect(onSetBoardVariant).toHaveBeenCalledWith("wide");
 
-    const gomokuRailButton = screen.getByRole("button", { name: "Gomoku" });
+    const gomokuRailButton = screen.getByRole("button", { name: "Switch to: Gomoku" });
     expect(gomokuRailButton).not.toBeDisabled();
     fireEvent.click(gomokuRailButton);
     expect(onSwitchGame).toHaveBeenCalledWith("gomoku");
@@ -1033,7 +1295,11 @@ describe("GameRoomView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     const tap = new Event("touchstart", { bubbles: true, cancelable: true });
 
-    expect(document.body.dispatchEvent(tap)).toBe(false);
+    let dispatched = true;
+    act(() => {
+      dispatched = document.body.dispatchEvent(tap);
+    });
+    expect(dispatched).toBe(false);
     expect(tap.defaultPrevented).toBe(true);
     expect(screen.queryByRole("button", { name: "Flap" })).not.toBeInTheDocument();
   });

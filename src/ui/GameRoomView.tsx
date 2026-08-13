@@ -18,11 +18,13 @@ import {
   Volume2,
   VolumeX
 } from "lucide-react";
-import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BattleshipShip, BoardPoint, BotDifficulty, BoardVariant, Cell, DominoTile, GameId, GameMove, LastCardCard, PlayerMark } from "../shared/games";
 import { canBotStart, GAME_IDS, getBoardVariantOptions, getGameDefinition, isCupPongReRackAvailable, isSoloGame, maxPlayersForGame, playerNameFor } from "../shared/games";
 import { REACTIONS, type AppliedMove, type RoomSnapshot } from "../shared/protocol";
 import { ThreeGameScene } from "./ThreeGameScene";
+import { getChessLegalMoves, getChessStatus } from "../games/chess/engine";
+import type { ChessPiece, ChessPromotion, SetTrioCard } from "../shared/games";
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting";
 
@@ -131,6 +133,7 @@ export function GameRoomView({
   onChat,
   onReaction,
   onRematch,
+  onRequestUndo,
   onClaimSeat,
   onSwitchGame,
   onSetBoardVariant,
@@ -142,37 +145,55 @@ export function GameRoomView({
   const definition = getGameDefinition(room.gameId);
   const solo = isSoloGame(room.gameId);
   const boardVariantOptions = getBoardVariantOptions(room.gameId);
-  const currentPlayer = room.players.find((player) => player.guestToken === guestToken);
-  const currentSpectator = room.spectators.find((spectator) => spectator.guestToken === guestToken);
+  const currentPlayer = room.you?.role === "player"
+    ? room.players.find((player) => player.participantId === room.you?.participantId)
+    : room.players.find((player) => player.guestToken === guestToken);
+  const currentSpectator = room.you?.role === "spectator"
+    ? room.spectators.find((spectator) => spectator.participantId === room.you?.participantId)
+    : room.spectators.find((spectator) => spectator.guestToken === guestToken);
   const currentTurnPlayer = room.players.find((player) => player.mark === room.turn);
   const humanPlayers = room.players.filter((player) => !player.isBot);
   const connectedHumanPlayers = humanPlayers.filter((player) => player.connected);
   const disconnectedOpponents = humanPlayers.filter((player) =>
-    !player.connected && player.guestToken !== guestToken
+    !player.connected && player.mark !== currentPlayer?.mark
   );
   const voteTarget = room.opponent === "friend" ? Math.max(1, connectedHumanPlayers.length) : 1;
   const isHost = currentPlayer?.mark === "p1";
-  const settingsLocked = !isHost;
+  const interactionsEnabled = connectionStatus === "connected";
+  const settingsLocked = !isHost || !interactionsEnabled;
   const rematchText = room.rematchRequests.length > 0 && room.opponent === "friend"
     ? `Rematch vote ${room.rematchRequests.length}/${voteTarget}`
     : "Rematch";
+  const undoText = room.undoRequests.length > 0
+    ? `Undo vote ${room.undoRequests.length}/${voteTarget}`
+    : "Undo";
   const openSeat = room.opponent === "friend" && (
     room.players.some((player) => !player.connected && !player.isBot) ||
     room.players.filter((player) => !player.isBot).length < maxPlayersForGame(room.gameId)
   );
-  const canMove = Boolean(currentPlayer && currentPlayer.mark === room.turn && !room.winner);
-  const spectatorReactionsLocked = Boolean(currentSpectator && !room.winner);
+  const canMove = Boolean(
+    currentPlayer
+    && interactionsEnabled
+    && !room.winner
+    && room.phase !== "waiting"
+    && (room.gameId === "set-trio" || room.gameId === "word-hunt" || currentPlayer.mark === room.turn)
+  );
+  const spectatorReactionsLocked = !interactionsEnabled || Boolean(currentSpectator && !room.winner);
   const lastMovePlayer = lastMove ? room.players.find((player) => player.mark === lastMove.player) : undefined;
   const lastMoveIsBot = Boolean(lastMovePlayer?.isBot);
   const gameplayStatus = solo
     ? "Solo run"
+    : room.phase === "waiting"
+    ? "Waiting for players"
     : disconnectedOpponents.length > 0 && !room.winner
     ? "Opponent reconnecting"
     : room.winner
     ? room.winner === "draw"
       ? "Draw table"
       : `${playerNameFor(room.gameId, room.winner)} wins`
-    : currentTurnPlayer?.isBot
+    : room.gameId === "set-trio"
+      ? "Pattern race live"
+      : currentTurnPlayer?.isBot
       ? `${currentTurnPlayer.name} thinking`
       : `${playerNameFor(room.gameId, room.turn)} to move`;
   const status = connectionStatus === "connected"
@@ -190,7 +211,7 @@ export function GameRoomView({
   const submitChat = (event: FormEvent) => {
     event.preventDefault();
     const clean = message.trim();
-    if (!clean) return;
+    if (!clean || !interactionsEnabled) return;
     onChat(clean);
     setMessage("");
   };
@@ -213,6 +234,8 @@ export function GameRoomView({
               className={gameId === room.gameId ? "rail-game active" : "rail-game"}
               type="button"
               disabled={settingsLocked}
+              aria-label={`${gameId === room.gameId ? "Current game" : "Switch to"}: ${getGameDefinition(gameId).name}`}
+              aria-pressed={gameId === room.gameId}
               title={settingsLocked ? "Only the host can switch games." : `Switch to ${getGameDefinition(gameId).name}`}
               onClick={() => onSwitchGame(gameId)}
               key={gameId}
@@ -230,7 +253,7 @@ export function GameRoomView({
             <p>{room.roomId}</p>
             <h1>{definition.name}</h1>
           </div>
-          <div className={`status-chip connection-${connectionStatus}`}>{status}</div>
+          <div className={`status-chip connection-${connectionStatus}`} role="status" aria-live="polite">{status}</div>
           <button
             className="icon-button sound-toggle"
             type="button"
@@ -240,10 +263,27 @@ export function GameRoomView({
           >
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
-          <button className="icon-text-button" type="button" onClick={onRematch}>
+          <button
+            className="icon-text-button"
+            type="button"
+            disabled={!interactionsEnabled || !currentPlayer || !room.winner}
+            title={!room.winner ? "Rematch is available after the game ends." : undefined}
+            onClick={onRematch}
+          >
             <RotateCcw size={18} />
             {rematchText}
           </button>
+          {room.opponent === "friend" ? (
+            <button
+              className="icon-text-button"
+              type="button"
+              disabled={!interactionsEnabled || !currentPlayer || room.moveHistory.length === 0}
+              onClick={onRequestUndo}
+            >
+              <History size={18} />
+              {undoText}
+            </button>
+          ) : null}
         </header>
 
         {room.winner ? (
@@ -253,6 +293,19 @@ export function GameRoomView({
               {room.winner === "draw" ? "Draw table" : `${playerNameFor(room.gameId, room.winner)} wins`}
             </strong>
             <span>{room.winner === "draw" ? "Everybody gets the dramatic stare." : "The table has chosen a legend."}</span>
+          </section>
+        ) : null}
+
+        {room.phase === "waiting" ? (
+          <section className="waiting-banner" role="status">
+            <UsersRound size={20} />
+            <div>
+              <strong>The table is ready.</strong>
+              <span>{connectedHumanPlayers.length}/{maxPlayersForGame(room.gameId)} players seated. Share the invite to begin together.</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={onCopyInvite}>
+              <Copy size={17} /> {copiedInvite ? "Copied" : "Copy invite"}
+            </button>
           </section>
         ) : null}
 
@@ -311,7 +364,7 @@ export function GameRoomView({
         <section className="players-strip" aria-label="Players">
           <div className="section-title"><UsersRound size={16} /> Players</div>
           {room.players.map((player) => (
-            <div className={`player-row ${player.mark}`} key={player.guestToken}>
+            <div className={`player-row ${player.mark}`} key={player.participantId ?? player.guestToken}>
               <span className="player-piece" />
               <span>{player.name}</span>
               <small>{player.isBot ? "bot" : player.connected ? "live" : "reconnecting"}</small>
@@ -377,13 +430,13 @@ export function GameRoomView({
           <section className="spectator-strip" aria-label="Spectators">
             <div className="section-title"><Eye size={16} /> Spectators</div>
             {room.spectators.map((spectator) => (
-              <div className="spectator-row" key={spectator.guestToken}>
+              <div className="spectator-row" key={spectator.participantId ?? spectator.guestToken}>
                 <span>{spectator.name}</span>
                 <small>{spectator.connected ? "watching" : "away"}</small>
               </div>
             ))}
             {!currentPlayer && openSeat ? (
-              <button className="primary-button compact-action" type="button" onClick={onClaimSeat}>
+              <button className="primary-button compact-action" type="button" disabled={!interactionsEnabled} onClick={onClaimSeat}>
                 Take open seat
               </button>
             ) : null}
@@ -408,8 +461,9 @@ export function GameRoomView({
               onChange={(event) => setMessage(event.target.value)}
               placeholder="gg incoming"
               maxLength={180}
+              disabled={!interactionsEnabled}
             />
-            <button className="icon-button send-button" type="submit" aria-label="Send chat">
+            <button className="icon-button send-button" type="submit" aria-label="Send chat" disabled={!interactionsEnabled || !message.trim()}>
               <Send size={18} />
             </button>
           </form>
@@ -460,6 +514,10 @@ function Board({
     return <CheckersBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
   }
 
+  if (room.gameId === "chess") {
+    return <ChessBoard room={room} canMove={canMove} currentMark={currentMark} lastMove={lastMove} onMove={onMove} />;
+  }
+
   if (room.gameId === "battleship") {
     return <BattleshipBoard room={room} canMove={canMove} lastMove={lastMove} onMove={onMove} />;
   }
@@ -485,7 +543,7 @@ function Board({
   }
 
   if (room.gameId === "word-hunt") {
-    return <WordHuntBoard room={room} canMove={Boolean(currentMark && !room.winner)} currentMark={currentMark} onMove={onMove} />;
+    return <WordHuntBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
   }
 
   if (room.gameId === "cup-pong") {
@@ -510,6 +568,10 @@ function Board({
 
   if (room.gameId === "dice-duel") {
     return <DiceDuelBoard room={room} canMove={canMove} onMove={onMove} />;
+  }
+
+  if (room.gameId === "set-trio") {
+    return <SetTrioBoard room={room} canMove={canMove} currentMark={currentMark} onMove={onMove} />;
   }
 
   if (room.gameId === "snake") {
@@ -905,6 +967,154 @@ function CheckersBoard({
   );
 }
 
+const CHESS_GLYPHS: Record<Exclude<ChessPiece, "">, string> = {
+  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟"
+};
+
+const CHESS_PIECE_NAMES: Record<string, string> = {
+  K: "white king", Q: "white queen", R: "white rook", B: "white bishop", N: "white knight", P: "white pawn",
+  k: "black king", q: "black queen", r: "black rook", b: "black bishop", n: "black knight", p: "black pawn"
+};
+
+function ChessBoard({
+  room,
+  canMove,
+  currentMark,
+  lastMove,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  lastMove: AppliedMove | null;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.chess;
+  const [selected, setSelected] = useState<number | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: number; to: number } | null>(null);
+  const legalMoves = useMemo(
+    () => meta && currentMark ? getChessLegalMoves(meta, currentMark) : [],
+    [currentMark, meta]
+  );
+
+  useEffect(() => {
+    setSelected(null);
+    setPendingPromotion(null);
+  }, [meta?.lastMove?.from, meta?.lastMove?.to, meta?.fullmoveNumber]);
+
+  if (!meta) return <div className="board-loading">Setting the chessmen...</div>;
+  const status = getChessStatus(meta);
+  const blackPerspective = currentMark === "p2";
+  const displaySquares = Array.from({ length: 64 }, (_, position) =>
+    blackPerspective ? 63 - position : position
+  );
+  const legalTargets = new Set(
+    selected === null ? [] : legalMoves.filter((move) => move.from === selected).map((move) => move.to)
+  );
+
+  const sendMove = (from: number, to: number, promotion?: ChessPromotion) => {
+    if (!canMove) return;
+    onMove({
+      row: Math.floor(from / 8),
+      column: from % 8,
+      toRow: Math.floor(to / 8),
+      toColumn: to % 8,
+      ...(promotion ? { promotion } : {})
+    });
+    setSelected(null);
+    setPendingPromotion(null);
+  };
+
+  const chooseSquare = (index: number) => {
+    if (!canMove || pendingPromotion) return;
+    const piece = meta.board[index];
+    const ownsPiece = currentMark === "p1"
+      ? piece !== "" && piece === piece.toUpperCase()
+      : currentMark === "p2" && piece !== "" && piece === piece.toLowerCase();
+
+    if (selected !== null) {
+      const candidates = legalMoves.filter((move) => move.from === selected && move.to === index);
+      if (candidates.length > 0) {
+        if (candidates.some((move) => move.promotion)) {
+          setPendingPromotion({ from: selected, to: index });
+        } else {
+          sendMove(selected, index);
+        }
+        return;
+      }
+    }
+    setSelected(ownsPiece ? index : null);
+  };
+
+  const statusText = status.state === "checkmate"
+    ? "Checkmate"
+    : status.reason === "stalemate"
+      ? "Stalemate"
+      : status.reason === "threefold-repetition"
+        ? "Draw by threefold repetition"
+        : status.reason === "fifty-move"
+          ? "Draw by the 50-move rule"
+          : status.reason === "insufficient-material"
+            ? "Draw by insufficient material"
+            : status.inCheck
+              ? "Check"
+              : `${meta.turn === "white" ? "White" : "Black"} to move`;
+
+  return (
+    <div className="chess-table">
+      <div className="chess-status" role="status">
+        <span>{statusText}</span>
+        <small>{meta.fullmoveNumber}. {meta.halfmoveClock} half-moves since pawn/capture</small>
+      </div>
+      <div className="chess-board" role="group" aria-label="Chess board">
+        {displaySquares.map((index, displayPosition) => {
+          const piece = meta.board[index];
+          const row = Math.floor(index / 8);
+          const column = index % 8;
+          const file = String.fromCharCode(97 + column);
+          const rank = String(8 - row);
+          const isLast = meta.lastMove?.from === index || meta.lastMove?.to === index
+            || (lastMove?.row === row && lastMove.column === column);
+          return (
+            <button
+              className={`chess-square ${(row + column) % 2 ? "dark" : "light"}${selected === index ? " selected" : ""}${legalTargets.has(index) ? " legal" : ""}${isLast ? " last" : ""}`}
+              type="button"
+              aria-label={`${file}${rank}${piece ? ` ${CHESS_PIECE_NAMES[piece]}` : " empty"}${legalTargets.has(index) ? ", legal destination" : ""}`}
+              aria-pressed={selected === index}
+              disabled={!canMove}
+              onClick={() => chooseSquare(index)}
+              key={index}
+            >
+              {piece ? <span className={piece === piece.toUpperCase() ? "white-piece" : "black-piece"}>{CHESS_GLYPHS[piece]}</span> : null}
+              {displayPosition >= 56 ? <small className="chess-file">{file}</small> : null}
+              {displayPosition % 8 === 0 ? <small className="chess-rank">{rank}</small> : null}
+            </button>
+          );
+        })}
+      </div>
+      {pendingPromotion ? (
+        <div className="promotion-picker" role="group" aria-label="Choose promotion piece">
+          <strong>Promote pawn to</strong>
+          {(["q", "r", "b", "n"] as ChessPromotion[]).map((promotion) => (
+            <button
+              type="button"
+              className="promotion-option"
+              disabled={!canMove}
+              onClick={() => sendMove(pendingPromotion.from, pendingPromotion.to, promotion)}
+              key={promotion}
+            >
+              {CHESS_GLYPHS[currentMark === "p2" ? promotion : promotion.toUpperCase() as Exclude<ChessPiece, "">]}
+              <span>{{ q: "Queen", r: "Rook", b: "Bishop", n: "Knight" }[promotion]}</span>
+            </button>
+          ))}
+          <button type="button" className="ghost-button" onClick={() => setPendingPromotion(null)}>Cancel</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function BattleshipBoard({
   room,
   canMove,
@@ -1149,12 +1359,17 @@ function LastCardBoard({
 }) {
   const meta = room.meta?.lastCard;
   const topCard = meta?.discard.at(-1);
+  const [pendingWildIndex, setPendingWildIndex] = useState<number | null>(null);
+  useEffect(() => setPendingWildIndex(null), [meta?.discard.length, room.turn]);
   if (!meta || !topCard) return null;
 
   const hand = currentMark ? meta.hands[currentMark] ?? [] : [];
   const deckCount = meta.deckCount ?? meta.deck.length;
   const hasPlayableCard = hand.some((card) => lastCardPlayable(card, topCard, meta.currentColor, hand));
   const canDraw = canMove && !hasPlayableCard && (deckCount > 0 || meta.discard.length > 1);
+  const drawnOnlyId = currentMark && meta.lastDraw?.player === currentMark && meta.lastDraw.playable
+    ? meta.lastDraw.cardId
+    : undefined;
 
   return (
     <div className="last-card-table" role="group" aria-label="Color Clash table">
@@ -1205,17 +1420,39 @@ function LastCardBoard({
         )}
       </div>
 
+      {pendingWildIndex !== null ? (
+        <div className="last-card-color-picker" role="group" aria-label="Choose the next Color Clash color">
+          <strong>Choose the table color</strong>
+          {(["red", "yellow", "green", "blue"] as const).map((color) => (
+            <button
+              className={`last-card-color-choice ${color}`}
+              type="button"
+              aria-label={`Choose ${color}`}
+              onClick={() => {
+                onMove({ column: pendingWildIndex, color });
+                setPendingWildIndex(null);
+              }}
+              key={color}
+            >
+              {lastCardColorName(color)}
+            </button>
+          ))}
+          <button className="ghost-button" type="button" onClick={() => setPendingWildIndex(null)}>Cancel</button>
+        </div>
+      ) : null}
+
       <div className="last-card-hand" aria-label={currentMark ? "Your hand" : "Spectator hand view"}>
         {currentMark && hand.length > 0 ? (
           hand.map((card, index) => {
-            const playable = lastCardPlayable(card, topCard, meta.currentColor, hand);
+            const playable = lastCardPlayable(card, topCard, meta.currentColor, hand)
+              && (!drawnOnlyId || card.id === drawnOnlyId);
             return (
               <button
                 className={`last-card-hand-card ${card.color} ${playable ? "playable" : ""}`}
                 type="button"
                 disabled={!canMove || !playable}
                 aria-label={`Play ${lastCardAria(card)}`}
-                onClick={() => onMove({ column: index })}
+                onClick={() => card.color === "wild" ? setPendingWildIndex(index) : onMove({ column: index })}
                 key={card.id}
               >
                 <LastCardFace card={card} />
@@ -1249,6 +1486,7 @@ function DartsBoard({
   const flightIdRef = useRef(0);
   const [throwPreview, setThrowPreview] = useState<DartThrowResolution | null>(null);
   const [throwFlight, setThrowFlight] = useState<DartFlight | null>(null);
+  const [keyboardAim, setKeyboardAim] = useState({ xPct: 50, yPct: 18 });
   const meta = room.meta?.darts;
 
   useEffect(() => {
@@ -1342,13 +1580,42 @@ function DartsBoard({
   const throwFromKeyboard = () => {
     if (!canMove) return;
     const rect = boardRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) {
-      onMove({ row: 3, column: 0 });
-      return;
-    }
-    const resolved = resolveDartThrow(rect.width / 2, rect.height * 0.225, rect.width, rect.height);
+    const width = rect && rect.width > 0 ? rect.width : 400;
+    const height = rect && rect.height > 0 ? rect.height : 400;
+    const resolved = resolveDartThrow(
+      width * keyboardAim.xPct / 100,
+      height * keyboardAim.yPct / 100,
+      width,
+      height
+    );
     showDartFlight(resolved);
     onMove(resolved.move);
+  };
+
+  const handleDartKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const movement: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
+    };
+    const direction = movement[event.key];
+    if (direction) {
+      event.preventDefault();
+      const step = event.shiftKey ? 1 : 4;
+      setKeyboardAim((current) => {
+        const next = {
+          xPct: clamp(current.xPct + direction[0] * step, 4, 96),
+          yPct: clamp(current.yPct + direction[1] * step, 4, 96)
+        };
+        const rect = boardRef.current?.getBoundingClientRect();
+        const width = rect && rect.width > 0 ? rect.width : 400;
+        const height = rect && rect.height > 0 ? rect.height : 400;
+        setThrowPreview(resolveDartThrow(width * next.xPct / 100, height * next.yPct / 100, width, height));
+        return next;
+      });
+      return;
+    }
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    throwFromKeyboard();
   };
 
   return (
@@ -1372,16 +1639,14 @@ function DartsBoard({
         role="button"
         tabIndex={canMove ? 0 : -1}
         aria-label={canMove ? "Throw dart" : "Waiting for turn"}
+        aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Enter Space"
+        title={canMove ? "Arrow keys aim (Shift for fine aim); Enter or Space throws" : "Waiting for turn"}
         aria-disabled={!canMove}
         onPointerDown={beginThrow}
         onPointerMove={aimThrow}
         onPointerUp={finishThrow}
         onPointerCancel={cancelThrow}
-        onKeyDown={(event) => {
-          if (event.key !== " " && event.key !== "Enter") return;
-          event.preventDefault();
-          throwFromKeyboard();
-        }}
+        onKeyDown={handleDartKey}
       >
         <div className="dart-number-ring" aria-hidden="true">
           {DARTBOARD_SEGMENTS.map((segment, index) => {
@@ -1434,11 +1699,7 @@ function DartsBoard({
         onPointerMove={aimThrow}
         onPointerUp={finishThrow}
         onPointerCancel={cancelThrow}
-        onKeyDown={(event) => {
-          if (event.key !== " " && event.key !== "Enter") return;
-          event.preventDefault();
-          throwFromKeyboard();
-        }}
+        onKeyDown={handleDartKey}
       >
         <span className="dart-throw-line" aria-hidden="true" />
         <span className="dart-throw-grip" aria-hidden="true" />
@@ -1810,6 +2071,38 @@ function CupPongBoard({
     window.setTimeout(resetDrag, 240);
   }, [canThrow, onMove, resetDrag, selectedCup, updateDrag]);
 
+  const handleCupKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!canThrow) return;
+    const isArrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key);
+    if (isArrow) {
+      event.preventDefault();
+      const base = dragRef.current.active
+        ? dragRef.current
+        : { active: true, aim: 0.12, power: 0.38, pullX: 0, pullY: 0 };
+      const fine = event.shiftKey ? 0.025 : 0.075;
+      const next = {
+        ...base,
+        active: true,
+        aim: clamp(base.aim + (event.key === "ArrowLeft" ? -fine : event.key === "ArrowRight" ? fine : 0), -1, 1),
+        power: clamp(base.power + (event.key === "ArrowUp" ? fine : event.key === "ArrowDown" ? -fine : 0), 0.08, 1)
+      };
+      dragRef.current = next;
+      setDrag(next);
+      return;
+    }
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    const shot = dragRef.current.active
+      ? dragRef.current
+      : { active: false, aim: 0.12, power: 0.38, pullX: 0, pullY: 0 };
+    onMove({
+      column: selectedCup,
+      power: Number(shot.power.toFixed(3)),
+      aim: Number(shot.aim.toFixed(3))
+    });
+    window.setTimeout(resetDrag, 240);
+  };
+
   return (
     <div
       className={`cup-pong-table ${drag.active ? "aiming" : ""} ${lastThrow ? lastThrow.made ? "shot-made" : "shot-missed" : ""}`}
@@ -1860,15 +2153,13 @@ function CupPongBoard({
           tabIndex={canThrow ? 0 : -1}
           aria-disabled={!canThrow}
           aria-label={canThrow ? `Throw at cup ${selectedCup + 1}` : "Waiting for turn"}
+          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Enter Space"
+          title={canThrow ? "Arrow keys adjust aim and power; Enter or Space releases" : "Waiting for turn"}
           onPointerDown={beginThrow}
           onPointerMove={moveThrow}
           onPointerUp={finishThrow}
           onPointerCancel={resetDrag}
-          onKeyDown={(event) => {
-            if (!canThrow || event.key !== " ") return;
-            event.preventDefault();
-            onMove({ column: selectedCup, power: 0.5, aim: 0 });
-          }}
+          onKeyDown={handleCupKey}
         >
           <div className="cup-arc" aria-hidden="true">
             <i />
@@ -1883,6 +2174,7 @@ function CupPongBoard({
           <div className="cup-accuracy-chip" aria-hidden="true">{Math.max(0, Math.min(100, accuracy))}%</div>
           <div className="cup-ball cup-ball-control" aria-hidden="true" />
         </div>
+        <small className="cup-key-hint">Keyboard: arrows tune the throw · Enter releases</small>
       </div>
       <CupRack
         label={playerNameFor(room.gameId, "p1")}
@@ -2224,7 +2516,7 @@ function MemoryMatchBoard({
             <button
               className={`${visible ? "revealed" : ""} ${card.matched ? "matched" : ""} ${last ? meta.lastPair?.matched ? "pair-hit" : "pair-miss" : ""}`}
               type="button"
-              disabled={!canMove || card.matched || faceUp.has(index)}
+              disabled={!canMove || card.matched || (faceUp.has(index) && !meta.pendingMismatch)}
               onClick={() => onMove({ column: index })}
               aria-label={`Card ${index + 1}`}
               key={index}
@@ -2290,6 +2582,24 @@ function QuoridorBoard({
             </button>
           );
         })}
+        <svg
+          className="quoridor-wall-overlay"
+          viewBox={`0 0 ${size} ${size}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {meta.walls.map((wall, index) => (
+            <line
+              x1={wall.orientation === "h" ? wall.column : wall.column + 1}
+              y1={wall.orientation === "h" ? wall.row + 1 : wall.row}
+              x2={wall.orientation === "h" ? wall.column + 2 : wall.column + 1}
+              y2={wall.orientation === "h" ? wall.row + 1 : wall.row + 2}
+              className={wall.orientation}
+              vectorEffect="non-scaling-stroke"
+              key={`${wall.orientation}-${wall.row}-${wall.column}-${index}`}
+            />
+          ))}
+        </svg>
       </div>
       <div className="quoridor-wall-bank" aria-label="Wall placements">
         <span>{wallMode.toUpperCase()} walls for {mark === "p1" ? "South" : "North"}</span>
@@ -2380,6 +2690,144 @@ interface ArcadePressEvent {
   preventDefault: () => void;
   stopPropagation: () => void;
   type: string;
+}
+
+const SET_COLOR_NAMES = ["coral", "violet", "teal"] as const;
+const SET_SHAPE_NAMES = ["oval", "diamond", "wave"] as const;
+const SET_FILL_NAMES = ["open", "striped", "solid"] as const;
+
+function SetTrioBoard({
+  room,
+  canMove,
+  currentMark,
+  onMove
+}: {
+  room: RoomSnapshot;
+  canMove: boolean;
+  currentMark?: PlayerMark;
+  onMove: (move: GameMove) => void;
+}) {
+  const meta = room.meta?.setTrio;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [clock, setClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [meta?.revision]);
+
+  const setPlayerMark = currentMark === "p1" || currentMark === "p2" ? currentMark : null;
+  const cooldownUntil = setPlayerMark ? meta?.cooldowns[setPlayerMark]?.expiresAt ?? 0 : 0;
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    setClock(Date.now());
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= cooldownUntil) window.clearInterval(timer);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [cooldownUntil]);
+
+  if (!meta) return <div className="board-loading">Shuffling the Set deck...</div>;
+  const currentScore = setPlayerMark ? meta.scores[setPlayerMark] : null;
+  const lastClaim = meta.lastClaim;
+  const cooldownRemaining = Math.max(0, cooldownUntil - clock);
+  const canClaim = canMove && cooldownRemaining === 0;
+
+  const toggleCard = (cardId: string) => {
+    if (!canClaim) return;
+    setSelectedIds((current) => {
+      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
+      if (current.length >= 3) return [cardId];
+      return [...current, cardId];
+    });
+  };
+
+  const claim = () => {
+    if (selectedIds.length !== 3) return;
+    const indices = selectedIds.map((id) => meta.board.findIndex((card) => card.id === id));
+    if (indices.some((index) => index < 0)) return;
+    onMove({ column: indices[0], indices, cardIds: [...selectedIds] });
+  };
+
+  return (
+    <div className="set-trio-table">
+      <header className="set-trio-scoreboard">
+        <div><small>Finder 1</small><strong>{meta.scores.p1}</strong></div>
+        <div className="set-trio-round">
+          <strong>{meta.deckRemaining}</strong>
+          <span>cards left</span>
+          <small>{meta.setsAvailable} {meta.setsAvailable === 1 ? "set" : "sets"} visible</small>
+        </div>
+        <div><small>Finder 2</small><strong>{meta.scores.p2}</strong></div>
+      </header>
+      <div className="set-trio-board" role="group" aria-label="Set Trio cards">
+        {meta.board.map((card, index) => (
+          <SetTrioCardButton
+            card={card}
+            index={index}
+            selected={selectedIds.includes(card.id)}
+            disabled={!canClaim}
+            onToggle={() => toggleCard(card.id)}
+            key={card.id}
+          />
+        ))}
+      </div>
+      <footer className="set-trio-actions">
+        <div role="status">
+          {cooldownRemaining > 0
+            ? `Wrong trio cooldown: ${(cooldownRemaining / 1000).toFixed(1)}s`
+            : lastClaim
+            ? lastClaim.valid
+              ? `${lastClaim.player === currentMark ? "You" : playerNameFor("set-trio", lastClaim.player)} found a set (+${lastClaim.scoreDelta}).`
+              : `${lastClaim.player === currentMark ? "Your" : `${playerNameFor("set-trio", lastClaim.player)}'s`} trio was not a set (${lastClaim.scoreDelta}).`
+            : "Pick three cards where every feature is all the same or all different."}
+        </div>
+        {currentScore === null ? null : <span className="set-personal-score">Your score <strong>{currentScore}</strong></span>}
+        <button
+          className="primary-button set-claim-button"
+          type="button"
+          disabled={!canClaim || selectedIds.length !== 3}
+          onClick={claim}
+        >
+          Claim {selectedIds.length}/3
+        </button>
+      </footer>
+    </div>
+  );
+}
+
+function SetTrioCardButton({
+  card,
+  index,
+  selected,
+  disabled,
+  onToggle
+}: {
+  card: SetTrioCard;
+  index: number;
+  selected: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const color = SET_COLOR_NAMES[card.color];
+  const shape = SET_SHAPE_NAMES[card.shape];
+  const fill = SET_FILL_NAMES[card.fill];
+  const count = card.number + 1;
+  return (
+    <button
+      className={`set-card ${color} ${shape} ${fill}${selected ? " selected" : ""}`}
+      type="button"
+      aria-label={`Card ${index + 1}: ${count} ${color} ${fill} ${shape}${count === 1 ? "" : "s"}`}
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onToggle}
+    >
+      {Array.from({ length: count }, (_, symbolIndex) => (
+        <span className="set-symbol" aria-hidden="true" key={symbolIndex} />
+      ))}
+    </button>
+  );
 }
 
 function SnakeGame() {
@@ -3297,6 +3745,7 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "dots-and-boxes") return "Draw lines between dots. Complete a box to score it and keep the turn.";
   if (gameId === "reversi") return "Place a disc to trap opponent discs in a line. Trapped discs flip to your side.";
   if (gameId === "checkers") return "Move diagonally on dark squares, jump captures, and crown kings on the far edge.";
+  if (gameId === "chess") return "Standard chess: checkmate the king. Castling, en passant, explicit promotion, stalemate, repetition, the 50-move rule, and insufficient-material draws are enforced by the server.";
   if (gameId === "battleship") return "Fire at the bot fleet. Hits reveal ship squares, misses mark the water.";
   if (gameId === "mancala") return "Pick a pit on your side, sow stones counter-clockwise, and capture opposite stones.";
   if (gameId === "hex") return "Connect your assigned sides with an unbroken chain of stones.";
@@ -3304,11 +3753,12 @@ function rulesFor(gameId: GameId): string {
   if (gameId === "darts") return "Take three throws per turn and finish exactly on a double.";
   if (gameId === "word-hunt") return "Find as many connected words as you can before the timer ends. Longer words score more, and each word can be claimed once.";
   if (gameId === "cup-pong") return "Pick an opponent cup to sink it. Clear the other rack before yours disappears.";
-  if (gameId === "dominoes") return "Play a tile that matches either open end. Draw when stuck; lowest pips wins if everyone passes.";
+  if (gameId === "dominoes") return "Block dominoes: match either open end and pass only when no tile fits. Lowest remaining pips wins a blocked round.";
   if (gameId === "order-and-chaos") return "Order wins by making five Xs or Os in a row. Chaos wins by filling the board without a five-line.";
   if (gameId === "memory-match") return "Flip two cards. Matched pairs score and keep the turn; misses pass the turn.";
   if (gameId === "quoridor") return "Race to the opposite side. Move your pawn or place walls, but every player must keep a path.";
   if (gameId === "dice-duel") return "Roll to grow the turn pot, then bank it before a one busts the turn.";
+  if (gameId === "set-trio") return "Claim three cards whose number, color, shape, and fill are each all the same or all different. A wrong claim costs one point.";
   if (gameId === "flappy-bird") return "Thread the flyer through shifting pipe gaps and chase a clean high score.";
   if (gameId === "snake") return "Steer through the grid, eat food, and avoid the walls and your own tail.";
   if (gameId === "twenty-forty-eight") return "Slide matching number tiles together until the board runs out of moves.";
@@ -3327,6 +3777,8 @@ function botPersonality(difficulty: BotDifficulty, gameId: GameId): string {
   if (gameId === "memory-match") return "Card tracker. Higher levels remember exposed pairs and chain extra turns.";
   if (gameId === "quoridor") return "Maze racer. It advances efficiently and drops walls when the route math favors it.";
   if (gameId === "dice-duel") return "Risk manager. It banks near target and presses harder when the pot is small.";
+  if (gameId === "chess") return "Search-driven chess opponent. Ruthless mode calculates deeper while every move still passes full legal-move validation.";
+  if (gameId === "set-trio") return "Pattern hunter. It scans the same public table you see and chooses a server-validated trio.";
   return gameId === "battleship"
     ? "Cold sonar mode. It hunts patterns and celebrates every hit internally."
     : "Ruthless table brain. It searches for wins, blocks traps, and prefers center control.";

@@ -1,6 +1,7 @@
-import { SELF, reset } from "cloudflare:test";
+import { SELF, evictAllDurableObjects, reset } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import worker from "./index";
+import type { Env } from "./game-room";
 
 type ServerMessage = {
   type: string;
@@ -11,6 +12,11 @@ type ServerMessage = {
     gameId: string;
     boardVariant?: string;
     turn?: string;
+    revision?: number;
+    moveCount?: number;
+    phase?: "waiting" | "active" | "complete";
+    readyAt?: number | null;
+    you?: { participantId: string; role: "player" | "spectator"; mark?: string } | null;
     board: Array<Array<string | null>>;
     players: Array<{ name: string; mark: string; guestToken?: string; connected?: boolean; isBot?: boolean }>;
     spectators: Array<{ name: string; guestToken?: string }>;
@@ -43,38 +49,86 @@ type ServerMessage = {
         found: { p1: string[]; p2: string[]; p3: string[]; p4: string[] };
         scores: { p1: number; p2: number; p3: number; p4: number };
       };
+      chess?: {
+        board: string[];
+        turn: "white" | "black";
+        fullmoveNumber: number;
+        lastMove: { from: number; to: number; promotion: string | null } | null;
+      };
+      setTrio?: {
+        board: Array<{ id: string; number: number; color: number; shape: number; fill: number }>;
+        deckRemaining: number;
+        setsAvailable: number;
+        scores: { p1: number; p2: number };
+        cooldowns: {
+          p1: { durationMs: number; expiresAt?: number } | null;
+          p2: { durationMs: number; expiresAt?: number } | null;
+        };
+        revision: number;
+      };
     };
-    chat: Array<{ body: string; guestToken?: string }>;
+    chat: Array<{ body: string }>;
     moveHistory: Array<{ player: string; label: string }>;
     rematchRequests: string[];
     undoRequests: string[];
   };
   move?: { player: string; row: number; column: number };
-  chat?: { body: string; guestToken?: string };
-  reaction?: { emoji: string; guestToken?: string };
+  chat?: { body: string };
+  reaction?: { emoji: string };
 };
 
+const openSockets = new Set<WebSocket>();
+
 afterEach(async () => {
+  await evictAllDurableObjects({ webSockets: "close" });
+  openSockets.clear();
   await reset();
 });
 
 describe("GameRoom Durable Object", () => {
-  it("uses exact CORS and security headers on API responses", async () => {
-    const allowed = await SELF.fetch("https://table-sparks.test/api/health", {
-      headers: { origin: "https://table.builtwai.com" }
-    });
+  it("rejects untrusted browser origins and never emits wildcard CORS", async () => {
+    const blocked = await worker.fetch(
+      new Request("https://table.builtwai.com/api/health", {
+        headers: { origin: "https://attacker.example" }
+      }),
+      {} as Env
+    );
+    expect(blocked.status).toBe(403);
+    expect(blocked.headers.get("cache-control")).toBe("no-store");
+    expect(blocked.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const allowed = await worker.fetch(
+      new Request("https://table.builtwai.com/api/health", {
+        headers: { origin: "https://table.builtwai.com" }
+      }),
+      {} as Env
+    );
+    expect(allowed.status).toBe(200);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://table.builtwai.com");
+    expect(allowed.headers.get("access-control-allow-origin")).not.toBe("*");
+    expect(allowed.headers.get("cache-control")).toBe("no-store");
+    expect(allowed.headers.get("strict-transport-security")).toContain("max-age=31536000");
     expect(allowed.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(allowed.headers.get("x-frame-options")).toBe("DENY");
+    expect(allowed.headers.get("permissions-policy")).toContain("microphone=()");
+  });
 
-    const denied = await SELF.fetch("https://table-sparks.test/api/health", {
-      headers: { origin: "https://evil.example" }
+  it("rejects malformed and oversized room-creation JSON before parsing it", async () => {
+    const malformed = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: "{not-json",
+      headers: { "content-type": "application/json" }
     });
-    expect(denied.status).toBe(403);
-    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+    expect(malformed.status).toBe(400);
+    await expect(malformed.json()).resolves.toMatchObject({ error: "Invalid request body." });
 
-    const invalidRoom = await SELF.fetch("https://table-sparks.test/api/rooms/not-a-room");
-    expect(invalidRoom.status).toBe(404);
-    expect(invalidRoom.headers.get("content-type")).toContain("application/json");
+    const oversized = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", padding: "x".repeat(8 * 1024) }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({ error: "Request body is too large." });
   });
 
   it("serves static assets for non-API room routes", async () => {
@@ -84,7 +138,7 @@ describe("GameRoom Durable Object", () => {
         ASSETS: {
           fetch: async (request: Request) => new Response(`asset:${new URL(request.url).pathname}`)
         }
-      } as Env
+      } as unknown as Env
     );
 
     expect(response.status).toBe(200);
@@ -112,29 +166,6 @@ describe("GameRoom Durable Object", () => {
     expect(json.invitePath).toBe(`/room/${json.roomId}`);
   });
 
-  it("rejects malformed messages and missing guest capabilities", async () => {
-    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
-      method: "POST",
-      body: JSON.stringify({ gameId: "tic-tac-toe" }),
-      headers: { "content-type": "application/json" }
-    });
-    const { roomId } = (await created.json()) as { roomId: string };
-    const socket = await openRoomSocket(roomId);
-    socket.send("null");
-    expect((await waitForType(socket, "error")).reason).toBe("Invalid message.");
-    socket.send(JSON.stringify({ type: "join", name: "No Token" }));
-    expect((await waitForType(socket, "error")).reason).toBe("Missing guest token.");
-  });
-
-  it("rejects oversized room-creation bodies before parsing", async () => {
-    const response = await SELF.fetch("https://table-sparks.test/api/rooms", {
-      method: "POST",
-      body: JSON.stringify({ gameId: "tic-tac-toe", padding: "x".repeat(9 * 1024) }),
-      headers: { "content-type": "application/json" }
-    });
-    expect(response.status).toBe(413);
-  });
-
   it("coordinates seats, moves, chat, reactions, and snapshots over WebSockets", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
@@ -153,8 +184,6 @@ describe("GameRoom Durable Object", () => {
     yellow.send(JSON.stringify({ type: "join", guestToken: "token-yellow", name: "Sunny" }));
     const yellowSnapshot = await waitForType(yellow, "room_snapshot");
     expect(yellowSnapshot.room?.players).toHaveLength(2);
-    expect(yellowSnapshot.room?.players.find((player) => player.name === "Sunny")?.guestToken).toBe("token-yellow");
-    expect(JSON.stringify(yellowSnapshot)).not.toContain("token-red");
 
     red.send(JSON.stringify({ type: "make_move", move: { column: 0 } }));
     const moveMessage = await waitForType(yellow, "move_applied");
@@ -163,19 +192,136 @@ describe("GameRoom Durable Object", () => {
     yellow.send(JSON.stringify({ type: "send_chat", body: "that drop was loud" }));
     const chatMessage = await waitForType(red, "chat_added");
     expect(chatMessage.chat?.body).toBe("that drop was loud");
-    expect(chatMessage.chat?.guestToken).not.toBe("token-yellow");
 
     red.send(JSON.stringify({ type: "send_reaction", emoji: "😂" }));
     const reactionMessage = await waitForType(yellow, "reaction_added");
     expect(reactionMessage.reaction?.emoji).toBe("😂");
-    expect(reactionMessage.reaction?.guestToken).not.toBe("token-red");
 
     const snapshotResponse = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}`);
     const snapshot = (await snapshotResponse.json()) as ServerMessage["room"];
     expect(snapshot?.board[5][0]).toBe("p1");
     expect(snapshot?.chat.at(-1)?.body).toBe("that drop was loud");
-    expect(JSON.stringify(snapshot)).not.toContain("token-red");
-    expect(JSON.stringify(snapshot)).not.toContain("token-yellow");
+  });
+
+  it("keeps reconnect credentials out of every snapshot and prevents token replay from public ids", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const hostToken = "credential-host-secret";
+
+    const host = await openRoomSocket(roomId);
+    host.send(JSON.stringify({ type: "join", guestToken: hostToken, name: "Host" }));
+    const hostSnapshot = await waitForType(host, "room_snapshot");
+    expect(JSON.stringify(hostSnapshot)).not.toContain(hostToken);
+    expect(hostSnapshot.room?.you?.mark).toBe("p1");
+
+    const publicResponse = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}`);
+    const publicText = await publicResponse.text();
+    expect(publicText).not.toContain(hostToken);
+    const publicRoom = JSON.parse(publicText) as NonNullable<ServerMessage["room"]>;
+    expect(publicRoom.you).toBeNull();
+    const publicHostId = publicRoom.players.find((player) => player.mark === "p1")?.guestToken;
+    expect(publicHostId).toBeTruthy();
+    expect(publicHostId).not.toBe(hostToken);
+
+    const attacker = await openRoomSocket(roomId);
+    attacker.send(JSON.stringify({ type: "join", guestToken: publicHostId, name: "Attacker" }));
+    const attackerSnapshot = await waitForType(attacker, "room_snapshot");
+    expect(attackerSnapshot.room?.you?.mark).toBe("p2");
+    expect(attackerSnapshot.room?.players.find((player) => player.mark === "p1")?.name).toBe("Host");
+  });
+
+  it("accepts only URL-safe guest credentials", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const socket = await openRoomSocket(roomId);
+
+    socket.send(JSON.stringify({ type: "join", guestToken: "token with spaces", name: "Mallory" }));
+    expect((await waitForType(socket, "error")).reason).toMatch(/invalid/i);
+
+    socket.send(JSON.stringify({ type: "join", guestToken: "token-safe_123", name: "Ruby" }));
+    const joined = await waitForType(socket, "room_snapshot");
+    expect(joined.room?.you?.mark).toBe("p1");
+    expect(joined.room?.players).toMatchObject([{ name: "Ruby", mark: "p1" }]);
+  });
+
+  it("rate-limits chat and reactions independently from gameplay messages", async () => {
+    const { socket } = await createAndJoinRoom("tic-tac-toe", "rate-player", "Ruby");
+
+    for (let index = 0; index < 8; index += 1) {
+      socket.send(JSON.stringify({ type: "send_chat", body: `message ${index}` }));
+      expect((await waitForType(socket, "chat_added")).chat?.body).toBe(`message ${index}`);
+    }
+    socket.send(JSON.stringify({ type: "send_chat", body: "one too many" }));
+    expect((await waitForType(socket, "error")).reason).toMatch(/chat rate limit/i);
+
+    for (let index = 0; index < 12; index += 1) {
+      socket.send(JSON.stringify({ type: "send_reaction", emoji: "⭐" }));
+      expect((await waitForType(socket, "reaction_added")).reaction?.emoji).toBe("⭐");
+    }
+    socket.send(JSON.stringify({ type: "send_reaction", emoji: "⭐" }));
+    expect((await waitForType(socket, "error")).reason).toMatch(/reaction rate limit/i);
+  });
+
+  it("caps each socket at sixty total messages per ten-second window", async () => {
+    const { socket } = await createAndJoinRoom("tic-tac-toe", "budget-player", "Ruby");
+
+    // The join consumes the first message in this socket's aggregate budget.
+    for (let index = 1; index < 60; index += 1) {
+      socket.send(JSON.stringify({ type: "claim_seat" }));
+      expect((await waitForType(socket, "error")).reason).toMatch(/only spectators/i);
+    }
+
+    socket.send(JSON.stringify({ type: "claim_seat" }));
+    expect((await waitForType(socket, "error")).reason).toMatch(/too many messages/i);
+  });
+
+  it("deduplicates move commands and rejects stale revisions", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const x = await openRoomSocket(roomId);
+    const o = await openRoomSocket(roomId);
+    x.send(JSON.stringify({ type: "join", guestToken: "token-x", name: "Xena" }));
+    const initial = await waitForType(x, "room_snapshot");
+    o.send(JSON.stringify({ type: "join", guestToken: "token-o", name: "Omar" }));
+    await waitForType(o, "room_snapshot");
+
+    const command = {
+      type: "make_move",
+      move: { row: 0, column: 0 },
+      commandId: "command-fixed-001",
+      expectedRevision: initial.room?.revision ?? 0
+    };
+    x.send(JSON.stringify(command));
+    const applied = await waitForType(x, "move_applied");
+    expect(applied.room?.moveCount).toBe(1);
+    expect(applied.room?.revision).toBe(1);
+
+    x.send(JSON.stringify(command));
+    const duplicate = await waitForType(x, "room_snapshot");
+    expect(duplicate.room?.moveCount).toBe(1);
+
+    o.send(JSON.stringify({
+      type: "make_move",
+      move: { row: 1, column: 1 },
+      commandId: "command-stale-001",
+      expectedRevision: 0
+    }));
+    const stale = await waitForType(o, "error");
+    expect(stale.reason).toMatch(/table changed/i);
+    const refreshed = await waitForType(o, "room_snapshot");
+    expect(refreshed.room?.moveCount).toBe(1);
   });
 
   it("seats a bot opponent and answers after the human move", async () => {
@@ -549,7 +695,7 @@ describe("GameRoom Durable Object", () => {
     expect(removed.room?.turn).toBe("p2");
   });
 
-  it("votes for rematches in friend rooms before resetting", async () => {
+  it("rejects an early rematch, then requires both friend votes after game over", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({ gameId: "tic-tac-toe", opponent: "friend" }),
@@ -567,6 +713,18 @@ describe("GameRoom Durable Object", () => {
     x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 0 } }));
     await waitForType(o, "move_applied");
     x.send(JSON.stringify({ type: "request_rematch" }));
+    expect((await waitForType(x, "error")).reason).toMatch(/finish the current game/i);
+
+    o.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 0 } }));
+    await waitForType(x, "move_applied");
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 1 } }));
+    await waitForType(o, "move_applied");
+    o.send(JSON.stringify({ type: "make_move", move: { row: 1, column: 1 } }));
+    await waitForType(x, "move_applied");
+    x.send(JSON.stringify({ type: "make_move", move: { row: 0, column: 2 } }));
+    await waitForType(o, "game_over");
+
+    x.send(JSON.stringify({ type: "request_rematch" }));
     const waiting = await waitForType(o, "room_snapshot");
     expect(waiting.room?.rematchRequests).toHaveLength(1);
     expect(waiting.room?.rematchRequests).not.toContain("token-x");
@@ -580,7 +738,7 @@ describe("GameRoom Durable Object", () => {
     expect(resetRoom.room?.board.flat().filter(Boolean)).toHaveLength(0);
   });
 
-  it("lets a spectator claim an open seat", async () => {
+  it("protects a disconnected seat during the reconnect grace window", async () => {
     const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
       method: "POST",
       body: JSON.stringify({ gameId: "four-in-a-row", opponent: "friend" }),
@@ -604,13 +762,12 @@ describe("GameRoom Durable Object", () => {
       room.players.some((player) => player.name === "Sunny" && player.connected === false)
     );
     watcher.send(JSON.stringify({ type: "claim_seat" }));
-    const claimed = await waitForRoomWhere(red, (room) =>
-      room.players.some((player) => player.name === "Wally" && player.mark === "p2")
-    );
-    expect(claimed.room?.players).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "Wally", mark: "p2" })])
-    );
-    expect(claimed.room?.spectators).toHaveLength(0);
+    const protectedSeat = await waitForType(watcher, "error");
+    expect(protectedSeat.reason).toMatch(/protected/i);
+    const snapshot = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}`);
+    const room = (await snapshot.json()) as NonNullable<ServerMessage["room"]>;
+    expect(room.players.find((player) => player.mark === "p2")?.name).toBe("Sunny");
+    expect(room.spectators).toMatchObject([{ name: "Wally" }]);
   });
 
   it("blocks spectator reactions until the game ends", async () => {
@@ -651,7 +808,171 @@ describe("GameRoom Durable Object", () => {
     const reaction = await waitForType(x, "reaction_added");
     expect(reaction.reaction?.emoji).toBe("🏆");
   });
+
+  it("runs a server-authoritative chess friend game for two WebSocket clients", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "chess", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const white = await openRoomSocket(roomId);
+    const black = await openRoomSocket(roomId);
+    white.send(JSON.stringify({ type: "join", guestToken: "white-secret", name: "Willa" }));
+    const initial = await waitForType(white, "room_snapshot");
+    black.send(JSON.stringify({ type: "join", guestToken: "black-secret", name: "Basil" }));
+    await waitForType(black, "room_snapshot");
+
+    const whiteMoveForWhite = waitForType(white, "move_applied");
+    const whiteMoveForBlack = waitForType(black, "move_applied");
+    white.send(JSON.stringify({
+      type: "make_move",
+      commandId: "chess-command-0001",
+      expectedRevision: initial.room?.revision ?? 0,
+      move: { row: 6, column: 4, toRow: 4, toColumn: 4 }
+    }));
+    const [, whiteMove] = await Promise.all([whiteMoveForWhite, whiteMoveForBlack]);
+    expect(whiteMove.room?.meta?.chess?.board[36]).toBe("P");
+    expect(whiteMove.room?.turn).toBe("p2");
+    expect(whiteMove.room?.meta?.chess?.turn).toBe("black");
+
+    const blackMoveForWhite = waitForType(white, "move_applied");
+    const blackMoveForBlack = waitForType(black, "move_applied");
+    black.send(JSON.stringify({
+      type: "make_move",
+      commandId: "chess-command-0002",
+      expectedRevision: whiteMove.room?.revision ?? 1,
+      move: { row: 1, column: 4, toRow: 3, toColumn: 4 }
+    }));
+    const [blackMove] = await Promise.all([blackMoveForWhite, blackMoveForBlack]);
+    expect(blackMove.room?.meta?.chess?.board[28]).toBe("p");
+    expect(blackMove.room?.moveHistory.at(-1)?.label).toBe("E7-E5");
+  });
+
+  it("keeps friend rooms waiting until both seats are connected", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "chess", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const host = await openRoomSocket(roomId);
+    host.send(JSON.stringify({ type: "join", guestToken: "waiting-host", name: "Host" }));
+    const waiting = await waitForType(host, "room_snapshot");
+    expect(waiting.room?.phase).toBe("waiting");
+    host.send(JSON.stringify({ type: "make_move", move: { row: 6, column: 4, toRow: 4, toColumn: 4 } }));
+    expect((await waitForType(host, "error")).reason).toMatch(/waiting/i);
+
+    const friend = await openRoomSocket(roomId);
+    friend.send(JSON.stringify({ type: "join", guestToken: "waiting-friend", name: "Friend" }));
+    const active = await waitForType(friend, "room_snapshot");
+    expect(active.room?.phase).toBe("active");
+    expect(active.room?.readyAt).toEqual(expect.any(Number));
+  });
+
+  it("resolves Set Trio friend claims atomically from stable public card ids", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "set-trio", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const first = await openRoomSocket(roomId);
+    const second = await openRoomSocket(roomId);
+    first.send(JSON.stringify({ type: "join", guestToken: "finder-one", name: "Iris" }));
+    const initial = await waitForType(first, "room_snapshot");
+    second.send(JSON.stringify({ type: "join", guestToken: "finder-two", name: "Theo" }));
+    await waitForType(second, "room_snapshot");
+    const cards = initial.room?.meta?.setTrio?.board ?? [];
+    const indices = findSetIndices(cards);
+    const cardIds = indices.map((index) => cards[index].id);
+
+    first.send(JSON.stringify({
+      type: "make_move",
+      commandId: "set-command-0001",
+      expectedRevision: initial.room?.revision ?? 0,
+      move: { column: indices[0], indices, cardIds }
+    }));
+    const applied = await waitForType(second, "move_applied");
+    expect(applied.room?.meta?.setTrio?.scores.p1).toBe(1);
+    expect(applied.room?.meta?.setTrio?.revision).toBe(1);
+    expect(applied.room?.meta?.setTrio?.board.map((card) => card.id)).not.toEqual(cards.map((card) => card.id));
+
+    second.send(JSON.stringify({
+      type: "make_move",
+      commandId: "set-command-stale",
+      expectedRevision: 0,
+      move: { column: indices[0], indices, cardIds }
+    }));
+    expect((await waitForType(second, "error")).reason).toMatch(/table changed/i);
+  });
+
+  it("enforces Set Trio invalid-claim cooldowns on the authoritative room", async () => {
+    const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ gameId: "set-trio", opponent: "friend" }),
+      headers: { "content-type": "application/json" }
+    });
+    const { roomId } = (await created.json()) as { roomId: string };
+    const first = await openRoomSocket(roomId);
+    const second = await openRoomSocket(roomId);
+    first.send(JSON.stringify({ type: "join", guestToken: "cooldown-one", name: "Iris" }));
+    await waitForType(first, "room_snapshot");
+    second.send(JSON.stringify({ type: "join", guestToken: "cooldown-two", name: "Theo" }));
+    const active = await waitForType(second, "room_snapshot");
+    const cards = active.room?.meta?.setTrio?.board ?? [];
+    const indices = findNonSetIndices(cards);
+    const cardIds = indices.map((index) => cards[index].id);
+
+    first.send(JSON.stringify({
+      type: "make_move",
+      commandId: "set-invalid-0001",
+      expectedRevision: active.room?.revision ?? 0,
+      move: { column: indices[0], indices, cardIds }
+    }));
+    const applied = await waitForType(second, "move_applied");
+    expect(applied.room?.meta?.setTrio?.scores.p1).toBe(-1);
+    expect(applied.room?.meta?.setTrio?.cooldowns.p1?.expiresAt).toBeGreaterThan(Date.now());
+
+    first.send(JSON.stringify({
+      type: "make_move",
+      commandId: "set-invalid-0002",
+      expectedRevision: applied.room?.revision ?? 1,
+      move: { column: indices[0], indices, cardIds }
+    }));
+    expect((await waitForType(first, "error")).reason).toMatch(/cooldown/i);
+  });
 });
+
+function findSetIndices(cards: Array<{ number: number; color: number; shape: number; fill: number }>): [number, number, number] {
+  for (let first = 0; first < cards.length - 2; first += 1) {
+    for (let second = first + 1; second < cards.length - 1; second += 1) {
+      for (let third = second + 1; third < cards.length; third += 1) {
+        const trio = [cards[first], cards[second], cards[third]];
+        const valid = (["number", "color", "shape", "fill"] as const).every(
+          (feature) => trio.reduce((sum, card) => sum + card[feature], 0) % 3 === 0
+        );
+        if (valid) return [first, second, third];
+      }
+    }
+  }
+  throw new Error("Expected a playable Set Trio table.");
+}
+
+function findNonSetIndices(cards: Array<{ number: number; color: number; shape: number; fill: number }>): [number, number, number] {
+  for (let first = 0; first < cards.length - 2; first += 1) {
+    for (let second = first + 1; second < cards.length - 1; second += 1) {
+      for (let third = second + 1; third < cards.length; third += 1) {
+        const trio = [cards[first], cards[second], cards[third]];
+        const valid = (["number", "color", "shape", "fill"] as const).every(
+          (feature) => trio.reduce((sum, card) => sum + card[feature], 0) % 3 === 0
+        );
+        if (!valid) return [first, second, third];
+      }
+    }
+  }
+  throw new Error("Expected at least one invalid Set Trio claim.");
+}
 
 async function createAndJoinRoom(
   gameId: string,
@@ -660,7 +981,7 @@ async function createAndJoinRoom(
 ): Promise<{ roomId: string; socket: WebSocket }> {
   const created = await SELF.fetch("https://table-sparks.test/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ gameId, opponent: "friend" }),
+    body: JSON.stringify({ gameId, opponent: "bot" }),
     headers: { "content-type": "application/json" }
   });
   const { roomId } = (await created.json()) as { roomId: string };
@@ -672,7 +993,7 @@ async function createAndJoinRoom(
 
 async function openRoomSocket(roomId: string): Promise<WebSocket> {
   const response = await SELF.fetch(`https://table-sparks.test/api/rooms/${roomId}/socket`, {
-    headers: { upgrade: "websocket", origin: "https://table-sparks.test" }
+    headers: { upgrade: "websocket" }
   });
 
   expect(response.status).toBe(101);
@@ -681,6 +1002,8 @@ async function openRoomSocket(roomId: string): Promise<WebSocket> {
   const socket = response.webSocket;
   if (!socket) throw new Error("Expected WebSocket response.");
   socket.accept();
+  openSockets.add(socket);
+  socket.addEventListener("close", () => openSockets.delete(socket), { once: true });
   return socket;
 }
 

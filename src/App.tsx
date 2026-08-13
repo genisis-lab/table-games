@@ -43,7 +43,9 @@ export function createRoomOptionsFromSearch(gameId: GameId, search: string): Cre
 export function App() {
   const [path, setPath] = useState(window.location.pathname);
   const [creatingGameId, setCreatingGameId] = useState<GameId | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [guestName, setGuestName] = useState(() => readLocalStorage(NAME_KEY) ?? "");
+  const lastDirectAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -65,20 +67,29 @@ export function App() {
       }
     ) => {
       setCreatingGameId(gameId);
-      const response = await fetch(apiUrl("/api/rooms"), {
-        method: "POST",
-        body: JSON.stringify({ gameId, ...options }),
-        headers: { "content-type": "application/json" }
-      });
+      setCreateError(null);
+      try {
+        const response = await fetch(apiUrl("/api/rooms"), {
+          method: "POST",
+          body: JSON.stringify({ gameId, ...options }),
+          headers: { "content-type": "application/json" }
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          const failure = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(failure.error ?? "The table service did not accept the room.");
+        }
+
+        const room = (await response.json()) as { invitePath: string };
         setCreatingGameId(null);
-        return;
+        navigate(room.invitePath);
+        return true;
+      } catch (error) {
+        setCreateError(error instanceof Error ? error.message : "Could not create the room. Check your connection and try again.");
+        return false;
+      } finally {
+        setCreatingGameId(null);
       }
-
-      const room = (await response.json()) as { invitePath: string };
-      setCreatingGameId(null);
-      navigate(room.invitePath);
     },
     [navigate]
   );
@@ -87,9 +98,39 @@ export function App() {
   useEffect(() => {
     const gameId = newGameMatch?.[1];
     if (gameId && isGameId(gameId) && !creatingGameId) {
+      const attemptKey = `${gameId}${window.location.search}`;
+      if (lastDirectAttemptRef.current === attemptKey) return;
+      lastDirectAttemptRef.current = attemptKey;
       void createRoom(gameId, createRoomOptionsFromSearch(gameId, window.location.search));
     }
   }, [createRoom, creatingGameId, newGameMatch]);
+
+  const directGameId = newGameMatch?.[1];
+  if (directGameId && isGameId(directGameId) && createError && !creatingGameId) {
+    return (
+      <main className="join-screen">
+        <section className="join-panel create-error-panel" role="alert">
+          <div className="brand-lockup"><span className="brand-mark">TG</span><span>Table Games</span></div>
+          <h1>The table did not open.</h1>
+          <p>{createError}</p>
+          <div className="join-actions">
+            <button type="button" className="ghost-button" onClick={() => navigate("/")}>Back to games</button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                lastDirectAttemptRef.current = `${directGameId}${window.location.search}`;
+                setCreateError(null);
+                void createRoom(directGameId, createRoomOptionsFromSearch(directGameId, window.location.search));
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   const roomMatch = path.match(/^\/room\/([^/]+)$/);
   if (roomMatch) {
@@ -106,7 +147,12 @@ export function App() {
     );
   }
 
-  return <Lobby onCreateRoom={createRoom} creatingGameId={creatingGameId} />;
+  return (
+    <>
+      {createError ? <div className="toast" role="alert">{createError}</div> : null}
+      <Lobby onCreateRoom={createRoom} creatingGameId={creatingGameId} />
+    </>
+  );
 }
 
 function RoomRoute({
@@ -171,6 +217,8 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [lastMove, setLastMove] = useState<AppliedMove | null>(null);
+  const [connectionNonce, setConnectionNonce] = useState(0);
+  const [initialConnectionError, setInitialConnectionError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const errorTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -183,17 +231,28 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
 
   const send = useCallback((message: ClientMessage) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      showError("The table is reconnecting. Try that action again when it is live.");
+      return false;
+    }
     socket.send(JSON.stringify(message));
-  }, []);
+    return true;
+  }, [showError]);
 
   useEffect(() => {
     let intentionallyClosed = false;
     let reconnectAttempt = 0;
+    let snapshotTimer: number | null = null;
+    let hasSnapshot = false;
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
+    };
+
+    const clearSnapshotTimer = () => {
+      if (snapshotTimer) window.clearTimeout(snapshotTimer);
+      snapshotTimer = null;
     };
 
     const connect = () => {
@@ -201,20 +260,42 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
       clearReconnectTimer();
       setConnectionStatus((current) => current === "connected" ? "reconnecting" : "connecting");
 
-      const socket = new WebSocket(socketUrl(roomId));
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(socketUrl(roomId));
+      } catch {
+        setInitialConnectionError("This table could not be reached.");
+        setConnectionStatus("reconnecting");
+        reconnectTimerRef.current = window.setTimeout(connect, reconnectDelayForAttempt(reconnectAttempt++));
+        return;
+      }
       socketRef.current = socket;
+      clearSnapshotTimer();
+      snapshotTimer = window.setTimeout(() => {
+        if (!hasSnapshot) setInitialConnectionError("The table did not send its first update. Check the link and try again.");
+      }, 8000);
 
       socket.addEventListener("open", () => {
         reconnectAttempt = 0;
         setConnectionStatus("connected");
         setError(null);
+        setInitialConnectionError(null);
         socket.send(JSON.stringify({ type: "join", guestToken, name: guestName }));
       });
 
       socket.addEventListener("message", (event) => {
-        const message = JSON.parse(String(event.data)) as ServerMessage;
+        let message: ServerMessage;
+        try {
+          message = JSON.parse(String(event.data)) as ServerMessage;
+        } catch {
+          showError("The table sent an unreadable update.");
+          return;
+        }
         if ("room" in message && message.room) {
+          hasSnapshot = true;
+          clearSnapshotTimer();
           setRoom(message.room);
+          setInitialConnectionError(null);
           setConnectionStatus("connected");
         }
         if (message.type === "move_applied") setLastMove(message.move);
@@ -223,8 +304,10 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
 
       socket.addEventListener("close", () => {
         if (intentionallyClosed) return;
+        clearSnapshotTimer();
         if (socketRef.current === socket) socketRef.current = null;
         setConnectionStatus("reconnecting");
+        if (!hasSnapshot) setInitialConnectionError("This table is unavailable or the invite link is no longer valid.");
         const delay = reconnectDelayForAttempt(reconnectAttempt);
         reconnectAttempt += 1;
         reconnectTimerRef.current = window.setTimeout(connect, delay);
@@ -251,11 +334,12 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
       intentionallyClosed = true;
       if (errorTimerRef.current) window.clearTimeout(errorTimerRef.current);
       clearReconnectTimer();
+      clearSnapshotTimer();
       document.removeEventListener("visibilitychange", reconnectIfVisible);
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [guestName, guestToken, roomId, showError]);
+  }, [connectionNonce, guestName, guestToken, roomId, showError]);
 
   const inviteUrl = `${window.location.origin}/room/${roomId}`;
 
@@ -263,7 +347,26 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
     return (
       <main className="loading-room">
         <div className="loading-token">Table Games</div>
-        <p>Pulling up the chairs...</p>
+        {initialConnectionError ? (
+          <section className="loading-room-error" role="alert">
+            <strong>The table did not open.</strong>
+            <p>{initialConnectionError}</p>
+            <div className="join-actions">
+              <a className="ghost-button" href="/">Back to games</a>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  setInitialConnectionError(null);
+                  setConnectionStatus("connecting");
+                  setConnectionNonce((value) => value + 1);
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          </section>
+        ) : <p>Pulling up the chairs...</p>}
       </main>
     );
   }
@@ -279,11 +382,20 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
         copiedInvite={copiedInvite}
         lastMove={lastMove}
         onCopyInvite={async () => {
-          await navigator.clipboard?.writeText(inviteUrl);
-          setCopiedInvite(true);
-          window.setTimeout(() => setCopiedInvite(false), 1400);
+          try {
+            await copyText(inviteUrl);
+            setCopiedInvite(true);
+            window.setTimeout(() => setCopiedInvite(false), 1400);
+          } catch {
+            showError("Copy was blocked. Select the invite link and copy it manually.");
+          }
         }}
-        onMove={(move: GameMove) => send({ type: "make_move", move })}
+        onMove={(move: GameMove) => send({
+          type: "make_move",
+          move,
+          commandId: crypto.randomUUID(),
+          expectedRevision: room.revision ?? 0
+        })}
         onChat={(body) => send({ type: "send_chat", body })}
         onReaction={(emoji) => send({ type: "send_reaction", emoji })}
         onRematch={() => send({ type: "request_rematch" })}
@@ -296,6 +408,11 @@ function ConnectedRoom({ roomId, guestName }: { roomId: string; guestName: strin
       />
     </>
   );
+}
+
+export async function copyText(value: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+  await navigator.clipboard.writeText(value);
 }
 
 function getGuestToken(): string {

@@ -36,6 +36,9 @@ export interface MemoryMatchMeta {
 	scores: Record<MemoryMatchPlayerMark, number>;
 	pairsRemaining: number;
 	lastPair: { a: number; b: number; matched: boolean } | null;
+	pendingMismatch: boolean;
+	/** Server-private memory of cards that each bot/player has actually seen. */
+	seen: Record<MemoryMatchPlayerMark, Record<string, number>>;
 	seed: number;
 }
 
@@ -106,6 +109,8 @@ export function createMemoryMatchMeta(variant: MemoryMatchVariant): MemoryMatchM
 		scores: { p1: 0, p2: 0, p3: 0, p4: 0 },
 		pairsRemaining: pairs,
 		lastPair: null,
+		pendingMismatch: false,
+		seen: { p1: {}, p2: {}, p3: {}, p4: {} },
 		seed: randomSeed(),
 	};
 }
@@ -119,6 +124,9 @@ export function normalizeMemoryMatchMeta(meta: MemoryMatchMeta): MemoryMatchMeta
 		meta.pairsRemaining = Math.floor(meta.cards.filter((c) => !c.matched).length / 2);
 	}
 	if (meta.lastPair === undefined) meta.lastPair = null;
+	if (typeof meta.pendingMismatch !== "boolean") meta.pendingMismatch = false;
+	if (!meta.seen) meta.seen = { p1: {}, p2: {}, p3: {}, p4: {} };
+	for (const mark of ["p1", "p2", "p3", "p4"] as MemoryMatchPlayerMark[]) meta.seen[mark] ??= {};
 	if (typeof meta.seed !== "number" || meta.seed === 0) meta.seed = randomSeed();
 	return meta;
 }
@@ -132,6 +140,10 @@ export function applyMemoryMatchIntent(
 	meta.seed = randomSeed();
 	const opponent = otherMemoryPlayer(player);
 	const index = move.index;
+	if (meta.pendingMismatch) {
+		meta.faceUp = [];
+		meta.pendingMismatch = false;
+	}
 	if (!Number.isInteger(index) || index < 0 || index >= meta.cards.length) {
 		return { ok: false, reason: "Choose a card." };
 	}
@@ -146,12 +158,14 @@ export function applyMemoryMatchIntent(
 
 	if (meta.faceUp.length === 0) {
 		meta.faceUp = [index];
+		recordSeenCard(meta, index);
 		meta.lastPair = null;
 		return { ok: true, point, meta, nextTurn: player, winner: null };
 	}
 
 	const a = meta.faceUp[0];
 	const b = index;
+	recordSeenCard(meta, b);
 	if (meta.cards[a].value === meta.cards[b].value) {
 		meta.cards[a].matched = true;
 		meta.cards[b].matched = true;
@@ -163,7 +177,8 @@ export function applyMemoryMatchIntent(
 		return { ok: true, point, meta, nextTurn: player, winner };
 	}
 
-	meta.faceUp = [];
+	meta.faceUp = [a, b];
+	meta.pendingMismatch = true;
 	meta.lastPair = { a, b, matched: false };
 	return { ok: true, point, meta, nextTurn: opponent, winner: null };
 }
@@ -174,7 +189,7 @@ export function getMemoryMatchLegalMoves(
 ): MemoryMatchMove[] {
 	const moves: MemoryMatchMove[] = [];
 	for (let i = 0; i < meta.cards.length; i += 1) {
-		if (!meta.cards[i].matched && !meta.faceUp.includes(i)) moves.push({ index: i });
+		if (!meta.cards[i].matched && (meta.pendingMismatch || !meta.faceUp.includes(i))) moves.push({ index: i });
 	}
 	return moves;
 }
@@ -188,9 +203,10 @@ export function chooseMemoryMatchBotMove(
 	if (legalMoves.length === 0) return { index: 0 };
 	const pickRandom = (): MemoryMatchMove => legalMoves[Math.floor(Math.random() * legalMoves.length)];
 
-	if (meta.faceUp.length === 1) {
+	const memory = meta.seen[_player] ?? {};
+	if (meta.faceUp.length === 1 && !meta.pendingMismatch) {
 		const faceValue = meta.cards[meta.faceUp[0]].value;
-		const match = legalMoves.find((m) => meta.cards[m.index].value === faceValue);
+		const match = legalMoves.find((m) => memory[String(m.index)] === faceValue);
 		if (match) {
 			if (difficulty === "ruthless") return match;
 			if (difficulty === "sharp" && Math.random() < 0.6) return match;
@@ -201,7 +217,8 @@ export function chooseMemoryMatchBotMove(
 	if (difficulty !== "casual") {
 		const byValue = new Map<number, number[]>();
 		for (const m of legalMoves) {
-			const v = meta.cards[m.index].value;
+			const v = memory[String(m.index)];
+			if (v === undefined) continue;
 			const list = byValue.get(v) ?? [];
 			list.push(m.index);
 			byValue.set(v, list);
@@ -219,4 +236,12 @@ export function chooseMemoryMatchBotMove(
 		}
 	}
 	return pickRandom();
+}
+
+function recordSeenCard(meta: MemoryMatchMeta, index: number): void {
+	const card = meta.cards[index];
+	if (!card) return;
+	for (const mark of ["p1", "p2", "p3", "p4"] as MemoryMatchPlayerMark[]) {
+		meta.seen[mark][String(index)] = card.value;
+	}
 }

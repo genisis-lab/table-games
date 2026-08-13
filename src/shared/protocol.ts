@@ -11,23 +11,32 @@ import type {
 } from "./games";
 
 export interface RoomPlayer {
+  /** Stable public id. The reconnect credential is never included in snapshots. */
+  participantId?: string;
+  /** @deprecated Public snapshots contain a non-secret participant id here for old clients. */
   guestToken: string;
   name: string;
   mark: PlayerMark;
   connected: boolean;
+  disconnectedAt?: number;
   joinedAt: number;
   isBot?: boolean;
 }
 
 export interface RoomSpectator {
+  participantId?: string;
+  /** @deprecated Public snapshots contain a non-secret participant id here for old clients. */
   guestToken: string;
   name: string;
   connected: boolean;
+  disconnectedAt?: number;
   joinedAt: number;
 }
 
 export interface ChatMessage {
   id: string;
+  participantId?: string;
+  /** @deprecated Public snapshots contain a non-secret participant id here for old clients. */
   guestToken: string;
   name: string;
   body: string;
@@ -36,6 +45,8 @@ export interface ChatMessage {
 
 export interface ReactionEvent {
   id: string;
+  participantId?: string;
+  /** @deprecated Public snapshots contain a non-secret participant id here for old clients. */
   guestToken: string;
   name: string;
   emoji: string;
@@ -65,6 +76,8 @@ export interface RoomSnapshot {
   opponent: "friend" | "bot";
   botDifficulty: BotDifficulty;
   botStarts: boolean;
+  phase?: "waiting" | "active" | "complete";
+  readyAt?: number | null;
   players: RoomPlayer[];
   spectators: RoomSpectator[];
   board: Cell[][];
@@ -78,13 +91,21 @@ export interface RoomSnapshot {
   moveHistory: MoveRecord[];
   rematchRequests: string[];
   undoRequests: string[];
+  /** Monotonic game-state revision used to reject duplicate or stale moves. */
+  revision?: number;
+  /** Per-connection identity. Omitted from public HTTP snapshots. */
+  you?: {
+    participantId: string;
+    role: "player" | "spectator";
+    mark?: PlayerMark;
+  } | null;
   createdAt: number;
   updatedAt: number;
 }
 
 export type ClientMessage =
   | { type: "join"; guestToken: string; name: string }
-  | { type: "make_move"; move: GameMove }
+  | { type: "make_move"; move: GameMove; commandId?: string; expectedRevision?: number }
   | { type: "send_chat"; body: string }
   | { type: "send_reaction"; emoji: string }
   | { type: "request_rematch" }

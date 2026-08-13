@@ -47,9 +47,27 @@ import {
   normalizeQuoridorMeta
 } from "../games/quoridor/engine";
 import type { QuoridorMeta, QuoridorMove } from "../games/quoridor/engine";
+import {
+  applyChessIntent,
+  chooseChessBotMove,
+  createChessMeta,
+  getChessLegalMoves,
+  normalizeChessMeta
+} from "../games/chess/engine";
+import type { ChessMeta, ChessPromotion } from "../games/chess/engine";
+import {
+  applySetTrioIntent,
+  chooseSetTrioBotMove,
+  createSetTrioMeta,
+  getSetTrioLegalMoves,
+  normalizeSetTrioMeta
+} from "../games/set-trio/engine";
+import type { SetTrioMeta } from "../games/set-trio/engine";
 
 export type { DominoMeta, DominoTile } from "../games/domino/engine";
 export type { CupPongMeta } from "../games/cup-pong/engine";
+export type { ChessMeta, ChessPiece, ChessPromotion } from "../games/chess/engine";
+export type { SetTrioCard, SetTrioMeta } from "../games/set-trio/engine";
 export { isCupPongReRackAvailable } from "../games/cup-pong/engine";
 
 export type GameId =
@@ -60,6 +78,7 @@ export type GameId =
   | "dots-and-boxes"
   | "reversi"
   | "checkers"
+  | "chess"
   | "battleship"
   | "mancala"
   | "hex"
@@ -73,6 +92,7 @@ export type GameId =
   | "memory-match"
   | "quoridor"
   | "dice-duel"
+  | "set-trio"
   | "flappy-bird"
   | "snake"
   | "twenty-forty-eight";
@@ -98,6 +118,10 @@ export interface GameMove {
   aim?: number;
   piece?: "X" | "O";
   action?: "roll" | "bank";
+  color?: "red" | "yellow" | "green" | "blue";
+  promotion?: ChessPromotion;
+  indices?: number[];
+  cardIds?: string[];
 }
 
 export interface DotsMeta {
@@ -213,7 +237,7 @@ export interface LastCardMeta {
   hands: Record<PlayerMark, LastCardCard[]>;
   handCounts: Record<PlayerMark, number>;
   currentColor: LastCardActiveColor;
-  lastDraw?: { player: PlayerMark; count: number; playable?: boolean };
+  lastDraw?: { player: PlayerMark; count: number; playable?: boolean; cardId?: string };
   lastAction?: LastCardRank;
 }
 
@@ -233,6 +257,8 @@ export interface GameMeta {
   memoryMatch?: MemoryMatchMeta;
   quoridor?: QuoridorMeta;
   diceDuel?: DiceDuelMeta;
+  chess?: ChessMeta;
+  setTrio?: SetTrioMeta;
 }
 
 export interface GameDefinition {
@@ -336,6 +362,16 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     connectLength: 0,
     moveMode: "custom",
     playerNames: { p1: "Red", p2: "Black" },
+    supportsFriend: true
+  },
+  chess: {
+    id: "chess",
+    name: "Chess",
+    rows: 8,
+    columns: 8,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "White", p2: "Black" },
     supportsFriend: true
   },
   battleship: {
@@ -468,6 +504,16 @@ const DEFINITIONS: Record<GameId, GameDefinition> = {
     playerNames: { p1: "Roller 1", p2: "Roller 2" },
     supportsFriend: true
   },
+  "set-trio": {
+    id: "set-trio",
+    name: "Set Trio",
+    rows: 1,
+    columns: 1,
+    connectLength: 0,
+    moveMode: "custom",
+    playerNames: { p1: "Finder 1", p2: "Finder 2" },
+    supportsFriend: true
+  },
   "flappy-bird": {
     id: "flappy-bird",
     name: "Pipe Dash",
@@ -520,6 +566,7 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
   ],
   reversi: [{ id: "classic", label: "Classic", detail: "8x8" }],
   checkers: [{ id: "classic", label: "Classic", detail: "8x8" }],
+  chess: [{ id: "classic", label: "Standard", detail: "8x8 FIDE rules" }],
   battleship: [{ id: "classic", label: "Classic", detail: "10x10" }],
   mancala: [{ id: "classic", label: "Classic", detail: "6 pits" }],
   hex: [{ id: "classic", label: "Classic", detail: "11x11" }],
@@ -560,6 +607,7 @@ const BOARD_VARIANTS: Record<GameId, BoardVariantOption[]> = {
     { id: "wide", label: "120", detail: "long" },
     { id: "party", label: "150 + 2 dice", detail: "wild" }
   ],
+  "set-trio": [{ id: "classic", label: "Classic", detail: "81 cards, 12 on table" }],
   "flappy-bird": [{ id: "classic", label: "Classic", detail: "solo run" }],
   snake: [{ id: "classic", label: "Classic", detail: "solo chase" }],
   "twenty-forty-eight": [{ id: "classic", label: "Classic", detail: "solo merge" }]
@@ -746,7 +794,9 @@ export function applyGameMove(
   move: GameMove
 ): MoveResult {
   if (state.winner) return { ok: false, state, reason: "This game is already over." };
-  if (player !== state.turn && state.gameId !== "word-hunt") return { ok: false, state, reason: "It is not your turn." };
+  if (player !== state.turn && state.gameId !== "word-hunt" && state.gameId !== "set-trio") {
+    return { ok: false, state, reason: "It is not your turn." };
+  }
 
   switch (state.gameId) {
     case "ultimate-tic-tac-toe":
@@ -757,6 +807,8 @@ export function applyGameMove(
       return applyReversiMove(state, player, move);
     case "checkers":
       return applyCheckersMove(state, player, move);
+    case "chess":
+      return applyChessMove(state, player, move);
     case "battleship":
       return applyBattleshipMove(state, player, move);
     case "mancala":
@@ -783,6 +835,8 @@ export function applyGameMove(
       return applyQuoridorMove(state, player, move);
     case "dice-duel":
       return applyDiceDuelMove(state, player, move);
+    case "set-trio":
+      return applySetTrioMove(state, player, move);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -804,6 +858,8 @@ export function getLegalMoves(state: GameState): GameMove[] {
       return getReversiMoves(state, state.turn);
     case "checkers":
       return getCheckersMoves(state, state.turn);
+    case "chess":
+      return getChessMoves(state, state.turn);
     case "battleship":
       return getBattleshipMoves(state, state.turn);
     case "mancala":
@@ -830,6 +886,8 @@ export function getLegalMoves(state: GameState): GameMove[] {
       return getQuoridorMoves(state, state.turn);
     case "dice-duel":
       return getDiceDuelMoves(state, state.turn);
+    case "set-trio":
+      return getSetTrioMoves(state, state.turn);
     case "flappy-bird":
     case "snake":
     case "twenty-forty-eight":
@@ -881,6 +939,32 @@ export function chooseBotMove(
 
   if (state.gameId === "dice-duel") {
     return chooseDiceDuelMove({ ...state, turn: player }, player, difficulty);
+  }
+
+  if (state.gameId === "chess") {
+    const meta = state.meta?.chess;
+    if (!meta) return null;
+    const chessMoves = getChessLegalMoves(meta, player);
+    const move = chooseChessBotMove(meta, player, chessMoves, difficulty);
+    return move
+      ? {
+          row: Math.floor(move.from / 8),
+          column: move.from % 8,
+          toRow: Math.floor(move.to / 8),
+          toColumn: move.to % 8,
+          ...(move.promotion ? { promotion: move.promotion } : {})
+        }
+      : null;
+  }
+
+  if (state.gameId === "set-trio") {
+    const meta = state.meta?.setTrio;
+    if (!meta) return null;
+    const setPlayer = player === "p2" ? "p2" : "p1";
+    const legal = getSetTrioLegalMoves(meta, setPlayer);
+    if (legal.length === 0) return null;
+    const move = chooseSetTrioBotMove(meta, setPlayer, legal, difficulty);
+    return { column: move.indices[0], indices: [...move.indices], cardIds: [...move.cardIds] };
   }
 
   const winningMove = findImmediateWinningMove(state, player, legalMoves);
@@ -984,6 +1068,8 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
 
   if (gameId === "checkers") return { checkers: { kings: [] } };
 
+  if (gameId === "chess") return { chess: createChessMeta(variant) };
+
   if (gameId === "battleship") {
     const botFleet = makeFleetShips();
     const playerFleet = makeFleetShips();
@@ -1029,6 +1115,8 @@ function createMeta(gameId: GameId, variant: BoardVariant): GameMeta | undefined
   if (gameId === "quoridor") return { quoridor: createQuoridorMeta(variant) };
 
   if (gameId === "dice-duel") return { diceDuel: createDiceDuelMeta(variant) };
+
+  if (gameId === "set-trio") return { setTrio: createSetTrioMeta(variant) };
 
   return undefined;
 }
@@ -1417,7 +1505,7 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
 
     const drawnCard = meta.hands[player].at(-1);
     const playable = drawnCard ? isLastCardPlayable(drawnCard, top, meta.currentColor, meta.hands[player]) : false;
-    meta.lastDraw = { player, count: drawn, playable };
+    meta.lastDraw = { player, count: drawn, playable, ...(drawnCard ? { cardId: drawnCard.id } : {}) };
     delete meta.lastAction;
     syncLastCardHandCounts(meta);
     return {
@@ -1441,13 +1529,21 @@ function applyLastCardMove(state: GameState, player: PlayerMark, move: GameMove)
   const hand = meta.hands[player];
   const card = hand[move.column];
   if (!card) return { ok: false, state, reason: "That card is not in your hand." };
+  if (meta.lastDraw?.player === player && meta.lastDraw.playable
+    && meta.lastDraw.cardId && card.id !== meta.lastDraw.cardId) {
+    return { ok: false, state, reason: "After drawing, only the drawn card may be played." };
+  }
   if (!isLastCardPlayable(card, top, meta.currentColor, hand)) {
     return { ok: false, state, reason: "Match the discard color or rank." };
   }
 
+  if (card.color === "wild" && !LAST_CARD_COLORS.includes(move.color as LastCardActiveColor)) {
+    return { ok: false, state, reason: "Choose the next table color." };
+  }
+
   hand.splice(move.column, 1);
   meta.discard.push(card);
-  meta.currentColor = card.color === "wild" ? chooseLastCardColor(meta.hands[player]) : card.color;
+  meta.currentColor = card.color === "wild" ? move.color as LastCardActiveColor : card.color;
   meta.lastAction = card.rank;
   delete meta.lastDraw;
 
@@ -1703,6 +1799,80 @@ function applyDiceDuelMove(state: GameState, player: PlayerMark, move: GameMove)
       meta: { ...clonedMeta, diceDuel: result.meta }
     }
   };
+}
+
+function applyChessMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.chess ? normalizeChessMeta(clonedMeta.chess) : null;
+  if (!meta) return { ok: false, state, reason: "The chess board is not ready." };
+  if (!Number.isInteger(move.row) || !Number.isInteger(move.toRow) || !Number.isInteger(move.toColumn)) {
+    return { ok: false, state, reason: "Choose a chess piece and destination." };
+  }
+  const result = applyChessIntent(meta, player, {
+    from: (move.row ?? 0) * 8 + move.column,
+    to: (move.toRow ?? 0) * 8 + (move.toColumn ?? 0),
+    promotion: move.promotion ?? null
+  });
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, chess: result.meta }
+    }
+  };
+}
+
+function getChessMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.chess;
+  if (!meta) return [];
+  return getChessLegalMoves(meta, player).map((move) => ({
+    row: Math.floor(move.from / 8),
+    column: move.from % 8,
+    toRow: Math.floor(move.to / 8),
+    toColumn: move.to % 8,
+    ...(move.promotion ? { promotion: move.promotion } : {})
+  }));
+}
+
+function applySetTrioMove(state: GameState, player: PlayerMark, move: GameMove): MoveResult {
+  const clonedMeta = cloneMeta(state);
+  const meta = clonedMeta.setTrio ? normalizeSetTrioMeta(clonedMeta.setTrio) : null;
+  if (!meta) return { ok: false, state, reason: "The Set Trio deck is not ready." };
+  const setPlayer = player === "p2" ? "p2" : player === "p1" ? "p1" : null;
+  if (!setPlayer) return { ok: false, state, reason: "Set Trio supports two players." };
+  const result = applySetTrioIntent(meta, setPlayer, {
+    indices: move.indices,
+    cardIds: move.cardIds
+  });
+  if (!result.ok) return { ok: false, state, reason: result.reason };
+  return {
+    ok: true,
+    point: result.point,
+    state: {
+      ...state,
+      turn: result.nextTurn,
+      winner: result.winner,
+      winningLine: [],
+      moveCount: state.moveCount + 1,
+      meta: { ...clonedMeta, setTrio: result.meta }
+    }
+  };
+}
+
+function getSetTrioMoves(state: GameState, player: PlayerMark): GameMove[] {
+  const meta = state.meta?.setTrio;
+  if (!meta || (player !== "p1" && player !== "p2")) return [];
+  return getSetTrioLegalMoves(meta, player).map((move) => ({
+    column: move.indices[0],
+    indices: [...move.indices],
+    cardIds: [...move.cardIds]
+  }));
 }
 
 function okMove(
@@ -2126,7 +2296,10 @@ function getLastCardMoves(state: GameState, player: PlayerMark): GameMove[] {
   const top = meta ? lastCardTop(meta) : undefined;
   if (!meta || !top) return [];
 
-  const playable = getPlayableLastCardIndexes(meta, player).map((column) => ({ column }));
+  const playable = getPlayableLastCardIndexes(meta, player).map((column) => {
+    const card = meta.hands[player][column];
+    return card.color === "wild" ? { column, color: chooseLastCardColor(meta.hands[player]) } : { column };
+  });
   if (playable.length > 0) return playable;
   return canDrawLastCard(meta) ? [{ column: LAST_CARD_DRAW_MOVE }] : [];
 }
@@ -3082,10 +3255,14 @@ function isLastCardPlayable(
 function getPlayableLastCardIndexes(meta: LastCardMeta, player: PlayerMark): number[] {
   const top = lastCardTop(meta);
   if (!top) return [];
-  return meta.hands[player]
+  const playable = meta.hands[player]
     .map((card, index) => ({ card, index }))
     .filter(({ card }) => isLastCardPlayable(card, top, meta.currentColor, meta.hands[player]))
     .map(({ index }) => index);
+  if (meta.lastDraw?.player === player && meta.lastDraw.playable && meta.lastDraw.cardId) {
+    return playable.filter((index) => meta.hands[player][index]?.id === meta.lastDraw?.cardId);
+  }
+  return playable;
 }
 
 function canDrawLastCard(meta: LastCardMeta): boolean {
@@ -3317,7 +3494,7 @@ function addUniquePlayer(values: PlayerMark[], value: PlayerMark): void {
 }
 
 export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: PlayerMark): GameMeta | undefined {
-  if (!meta?.lastCard && !meta?.dominoes && !meta?.battleship && !meta?.memoryMatch) return meta;
+  if (!meta?.lastCard && !meta?.dominoes && !meta?.battleship && !meta?.memoryMatch && !meta?.setTrio) return meta;
 
   const next = JSON.parse(JSON.stringify(meta)) as GameMeta;
   if (meta.battleship && next.battleship) {
@@ -3369,6 +3546,13 @@ export function maskGameMetaForPlayer(meta: GameMeta | undefined, player?: Playe
     memory.cards = memory.cards.map((card, index) =>
       card.matched || faceUp.has(index) ? card : { value: -1, matched: false }
     );
+    memory.seen = { p1: {}, p2: {}, p3: {}, p4: {} };
+  }
+  if (meta.setTrio && next.setTrio) {
+    // The table is public, but the authoritative draw order is not. Keeping
+    // only deckRemaining prevents a client from previewing future cards.
+    next.setTrio.deckRemaining = meta.setTrio.deckRemaining ?? meta.setTrio.deck.length;
+    next.setTrio.deck = [];
   }
   return next;
 }
